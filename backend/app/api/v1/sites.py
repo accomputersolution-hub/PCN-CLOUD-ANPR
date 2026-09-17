@@ -9,8 +9,10 @@ from app.core.exceptions import NotFoundError
 from app.core.rbac import Permission
 from app.models.enums import AuditAction
 from app.models.site import DEFAULT_SITE_SETTINGS, Site
+from app.schemas.connectivity import SiteConnectivityOut, SiteConnectivityUpdate
 from app.schemas.site import SiteCreate, SiteOut, SiteUpdate
 from app.services.audit import write_audit
+from app.services.gateway import site_connectivity, update_site_connectivity
 from app.services.tenant import TenantContext
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -101,3 +103,41 @@ async def update_site(
     await db.commit()
     await db.refresh(site)
     return SiteOut.model_validate(site)
+
+
+@router.get("/{site_id}/connectivity", response_model=SiteConnectivityOut)
+async def get_site_connectivity(
+    site_id: str,
+    db: AsyncSession = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant),
+    _: object = Depends(require_permission(Permission.GATEWAY_READ)),
+) -> SiteConnectivityOut:
+    return await site_connectivity(db, ctx, site_id)
+
+
+@router.patch("/{site_id}/connectivity", response_model=SiteConnectivityOut)
+async def patch_site_connectivity(
+    site_id: str,
+    body: SiteConnectivityUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant),
+    _: object = Depends(require_permission(Permission.SITE_WRITE)),
+) -> SiteConnectivityOut:
+    out = await update_site_connectivity(db, ctx, site_id, body)
+    await write_audit(
+        db,
+        action=AuditAction.SITE_CONNECTIVITY_UPDATE,
+        user_id=ctx.user.id,
+        organization_id=out.organization_id,
+        ip=client_ip(request),
+        target_type="site",
+        target_id=site_id,
+        extra={
+            "connectivity_mode": out.connectivity_mode,
+            "anpr_deployment_mode": out.anpr_deployment_mode,
+            "primary_gateway_id": out.primary_gateway_id,
+        },
+    )
+    await db.commit()
+    return out

@@ -7,10 +7,12 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import CameraStatus, Direction, StreamType
+from app.models.enums import CameraSourceType, CameraStatus, Direction, StreamType
 
 if TYPE_CHECKING:
     from app.models.gate import Gate
+    from app.models.gateway import Gateway
+    from app.models.nvr import Nvr
     from app.models.organization import Organization
     from app.models.site import Site
 
@@ -38,7 +40,17 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_frame_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     streaming: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    source_type: Mapped[CameraSourceType] = mapped_column(
+        String(16), default=CameraSourceType.RTSP, nullable=False
+    )
+    nvr_id: Mapped[str | None] = mapped_column(ForeignKey("nvrs.id"), nullable=True, index=True)
+    channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    anpr_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    gateway_id: Mapped[str | None] = mapped_column(ForeignKey("gateways.id"), nullable=True, index=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     organization: Mapped[Organization] = relationship()
     site: Mapped[Site] = relationship(back_populates="cameras")
     gate: Mapped[Gate] = relationship(back_populates="cameras")
+    nvr: Mapped[Nvr | None] = relationship(back_populates="cameras")
+    gateway: Mapped[Gateway | None] = relationship(back_populates="cameras")

@@ -11,6 +11,8 @@ from app.core.rbac import Permission
 from app.models.camera import Camera
 from app.models.enums import AuditAction, CameraStatus
 from app.models.gate import Gate
+from app.models.gateway import Gateway
+from app.models.nvr import Nvr
 from app.models.site import Site
 from app.schemas.camera import (
     CameraCreate,
@@ -47,6 +49,17 @@ async def _get_camera(db: AsyncSession, camera_id: str, ctx: TenantContext) -> C
     ctx.ensure_org(camera.organization_id)
     ctx.ensure_site(camera.site_id)
     return camera
+
+
+async def _bind_nvr_and_gateway(db: AsyncSession, site_id: str, nvr_id: str | None, gateway_id: str | None) -> None:
+    if nvr_id:
+        nvr = await db.get(Nvr, nvr_id)
+        if nvr is None or nvr.site_id != site_id:
+            raise ValidationAppError("NVR does not belong to the selected site")
+    if gateway_id:
+        gw = await db.get(Gateway, gateway_id)
+        if gw is None or gw.site_id != site_id:
+            raise ValidationAppError("Gateway does not belong to the selected site")
 
 
 @router.get("", response_model=list[CameraOut])
@@ -133,6 +146,7 @@ async def create_camera(
         raise ValidationAppError("Gate does not belong to the selected site")
     ctx.ensure_org(site.organization_id)
     ctx.ensure_site(site.id)
+    await _bind_nvr_and_gateway(db, site.id, body.nvr_id, body.gateway_id)
     camera = Camera(
         organization_id=site.organization_id,
         site_id=site.id,
@@ -148,6 +162,11 @@ async def create_camera(
         resolution=body.resolution,
         enabled=body.enabled,
         status=CameraStatus.UNKNOWN,
+        source_type=body.source_type,
+        nvr_id=body.nvr_id,
+        channel=body.channel,
+        anpr_enabled=body.anpr_enabled,
+        gateway_id=body.gateway_id,
     )
     db.add(camera)
     await db.flush()
@@ -183,6 +202,9 @@ async def update_camera(
         camera.username_encrypted = encrypt_optional(data.pop("username"))
     if "password" in data:
         camera.password_encrypted = encrypt_optional(data.pop("password"))
+    nvr_id = data.get("nvr_id", camera.nvr_id)
+    gateway_id = data.get("gateway_id", camera.gateway_id)
+    await _bind_nvr_and_gateway(db, camera.site_id, nvr_id, gateway_id)
     for key, value in data.items():
         setattr(camera, key, value)
     await write_audit(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import bcrypt
 import jwt
@@ -24,6 +24,7 @@ def create_token(subject: str, token_type: str, expires_delta: timedelta) -> str
     payload: dict[str, Any] = {
         "sub": subject,
         "type": token_type,
+        "jti": str(uuid4()),
         "iat": int(now.timestamp()),
         "exp": int((now + expires_delta).timestamp()),
     }

@@ -13,6 +13,15 @@ CCTV/NVR → RTSP/ONVIF → Edge Agent → ANPR Engine → Backend API → Postg
 
 If the site internet drops, the edge agent keeps capturing into a local SQLite queue and syncs when the link returns.
 
+NVR reachability uses a **private VPN path**, not public RTSP port 554:
+
+- Mode 1: existing VPN router (MikroTik or other) enrolled as a gateway
+- Mode 2: PCN Cloud Gateway CPE when the current router cannot VPN
+
+See [CONNECTIVITY.md](CONNECTIVITY.md), [GATEWAY.md](GATEWAY.md), [DEPLOYMENT.md](DEPLOYMENT.md).
+
+Firebase is **prepared but not switched** (`AUTH_PROVIDER=jwt`, PostgreSQL, local storage). See [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
+
 ## Milestone 1 (this repository)
 
 Working path:
@@ -95,6 +104,9 @@ pytest
 - [API.md](API.md) — versioned REST + WebSocket
 - [EDGE_AGENT.md](EDGE_AGENT.md) — site agent, queue, sync
 - [ANPR_PIPELINE.md](ANPR_PIPELINE.md) — replaceable detectors/OCR
+- [CONNECTIVITY.md](CONNECTIVITY.md) — VPN modes and NVR path
+- [GATEWAY.md](GATEWAY.md) — gateway vs edge agent
+- [DEPLOYMENT.md](DEPLOYMENT.md) — customer examples A/B
 
 ## License note
 

@@ -15,6 +15,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.core.timeutil import ensure_utc
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.services.tenant import load_site_ids
@@ -57,7 +58,8 @@ async def rotate_refresh(db: AsyncSession, refresh_token: str) -> tuple[User, st
     stored = (
         await db.execute(select(RefreshToken).where(RefreshToken.token_hash == _token_hash(refresh_token)))
     ).scalar_one_or_none()
-    if stored is None or stored.revoked or stored.expires_at < datetime.now(UTC):
+    # SQLite may return naive expires_at; treat as UTC so expiry checks stay correct.
+    if stored is None or stored.revoked or ensure_utc(stored.expires_at) < datetime.now(UTC):
         raise UnauthorizedError("Refresh token is invalid")
     stored.revoked = True
     user = await db.get(User, payload["sub"])

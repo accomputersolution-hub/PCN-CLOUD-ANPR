@@ -20,6 +20,7 @@ from app.services.plate import normalize_plate
 from app.services.realtime import hub
 from app.services.storage import get_storage
 from app.services.visit import apply_visit_match
+from app.firebase.cost_controls import event_storage_keys
 
 
 def _settings(site: Site) -> dict[str, Any]:
@@ -152,13 +153,14 @@ async def ingest_event(
         vehicle.last_seen = ts
 
     storage = get_storage()
+    keys = event_storage_keys(camera.organization_id, eid)
     snapshot_key = plate_key = vehicle_key = None
     if snapshot_bytes:
-        snapshot_key = storage.save(f"{camera.organization_id}/{eid}/frame.jpg", snapshot_bytes, "image/jpeg")
+        snapshot_key = storage.save(keys["snapshot"], snapshot_bytes, "image/jpeg")
     if plate_crop_bytes:
-        plate_key = storage.save(f"{camera.organization_id}/{eid}/plate.jpg", plate_crop_bytes, "image/jpeg")
+        plate_key = storage.save(keys["plate_crop"], plate_crop_bytes, "image/jpeg")
     if vehicle_crop_bytes:
-        vehicle_key = storage.save(f"{camera.organization_id}/{eid}/vehicle.jpg", vehicle_crop_bytes, "image/jpeg")
+        vehicle_key = storage.save(keys["vehicle_crop"], vehicle_crop_bytes, "image/jpeg")
 
     event = AnprEvent(
         id=eid,

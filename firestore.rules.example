@@ -1,0 +1,68 @@
+rules_version = '2';
+
+// EXAMPLE ONLY — not production-verified.
+// Deploy only after review against the live Firebase project and Auth claims.
+// Backend Admin SDK bypasses these rules; they protect direct client SDK access.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function sameOrg(orgId) {
+      return signedIn()
+        && userDoc().organization_id == orgId
+        && userDoc().is_active == true;
+    }
+
+    function isSuperAdmin() {
+      return signedIn() && userDoc().role == 'SUPER_ADMIN';
+    }
+
+    match /organizations/{orgId} {
+      allow read: if isSuperAdmin() || sameOrg(orgId);
+      allow write: if false; // writes via Admin SDK / trusted backend only
+    }
+
+    match /sites/{siteId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /gateways/{gatewayId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /nvrs/{nvrId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /cameras/{cameraId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /vehicles/{vehicleId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /anprEvents/{eventId} {
+      allow read: if isSuperAdmin() || sameOrg(resource.data.organization_id);
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isSuperAdmin()
+        || sameOrg(resource.data.organization_id));
+      allow write: if false;
+    }
+  }
+}

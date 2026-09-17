@@ -72,3 +72,15 @@ async def get_edge_agent(
     if agent is None or not verify_password(x_edge_key, agent.agent_key_hash):
         raise UnauthorizedError("Invalid edge agent credentials")
     return agent
+
+
+async def get_gateway_device(
+    x_gateway_key: str | None = Header(default=None, alias="X-Gateway-Key"),
+    x_gateway_id: str | None = Header(default=None, alias="X-Gateway-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.gateway import authenticate_gateway
+
+    if not x_gateway_key or not x_gateway_id:
+        raise UnauthorizedError("Gateway credentials required")
+    return await authenticate_gateway(db, x_gateway_id, x_gateway_key)

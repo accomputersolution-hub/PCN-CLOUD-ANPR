@@ -1,0 +1,22 @@
+// EXAMPLE ONLY — not production-verified.
+// Object paths: {organizationId}/events/{eventId}/{snapshot|plate_crop|vehicle_crop}.jpg
+// Never put Admin credentials in the browser. Prefer short-lived signed URLs from the API.
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /{organizationId}/events/{eventId}/{fileName} {
+      allow read: if signedIn();
+      // Client writes disabled — uploads go through backend Admin SDK / signed upload URLs.
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

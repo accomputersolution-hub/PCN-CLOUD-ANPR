@@ -127,6 +127,8 @@ set EDGE_AGENT_KEY=<key>
 python -m pcn_edge.main
 ```
 
+The Edge Agent does **not** terminate customer VPN. Site connectivity (existing router vs PCN Cloud Gateway) is a separate device model — see GATEWAY.md.
+
 ## Live RTSP mode
 
 Prerequisites: **FFmpeg** on PATH, camera Start'd from the UI, agent registered.

@@ -33,6 +33,11 @@ class Permission(StrEnum):
     DASHBOARD_READ = "dashboard:read"
     MOCK_WRITE = "mock:write"
     ANPR_TEST = "anpr:test"
+    GATEWAY_READ = "gateway:read"
+    GATEWAY_WRITE = "gateway:write"
+    GATEWAY_PROVISION = "gateway:provision"
+    NVR_READ = "nvr:read"
+    NVR_WRITE = "nvr:write"
 
 
 ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
@@ -63,6 +68,11 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.DASHBOARD_READ,
         Permission.MOCK_WRITE,
         Permission.ANPR_TEST,
+        Permission.GATEWAY_READ,
+        Permission.GATEWAY_WRITE,
+        Permission.GATEWAY_PROVISION,
+        Permission.NVR_READ,
+        Permission.NVR_WRITE,
     },
     UserRole.SITE_MANAGER: {
         Permission.ORG_READ,
@@ -85,6 +95,11 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.DASHBOARD_READ,
         Permission.MOCK_WRITE,
         Permission.ANPR_TEST,
+        Permission.GATEWAY_READ,
+        Permission.GATEWAY_WRITE,
+        Permission.GATEWAY_PROVISION,
+        Permission.NVR_READ,
+        Permission.NVR_WRITE,
     },
     UserRole.SECURITY_GUARD: {
         Permission.SITE_READ,
@@ -104,6 +119,8 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.VEHICLE_READ,
         Permission.DASHBOARD_READ,
         Permission.REPORT_READ,
+        Permission.GATEWAY_READ,
+        Permission.NVR_READ,
     },
 }
 

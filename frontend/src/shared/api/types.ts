@@ -102,6 +102,12 @@ export interface CameraItem {
   rtsp_configured: boolean;
   site_name: string | null;
   gate_name: string | null;
+  source_type?: string;
+  nvr_id?: string | null;
+  channel?: string | null;
+  anpr_enabled?: boolean;
+  gateway_id?: string | null;
+  last_seen?: string | null;
 }
 
 export interface SiteItem {
@@ -112,6 +118,60 @@ export interface SiteItem {
   timezone: string;
   settings: Record<string, unknown>;
   is_active: boolean;
+  connectivity_mode?: string;
+  anpr_deployment_mode?: string;
+  primary_gateway_id?: string | null;
+}
+
+export interface GatewayItem {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  name: string;
+  device_type: "EXISTING_VPN_ROUTER" | "PCN_CLOUD_GATEWAY";
+  vendor: string;
+  model: string;
+  firmware_version: string | null;
+  vpn_status: string;
+  health_status: string;
+  provisioning_status: string;
+  last_seen: string | null;
+  lan_subnet: string | null;
+  is_active: boolean;
+  last_error: string | null;
+  config_version: number;
+  camera_count: number;
+  nvr_count: number;
+  site_name: string | null;
+  revoked: boolean;
+}
+
+export interface NvrItem {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  gateway_id: string | null;
+  name: string;
+  vendor: string;
+  model: string;
+  host: string;
+  channel_count: number;
+  enabled: boolean;
+  camera_count: number;
+  site_name: string | null;
+}
+
+export interface SiteConnectivity {
+  site_id: string;
+  organization_id: string;
+  site_name: string;
+  connectivity_mode: "EXISTING_VPN_ROUTER" | "PCN_CLOUD_GATEWAY";
+  anpr_deployment_mode: "LOCAL_EDGE_AGENT" | "CLOUD_VIA_GATEWAY";
+  primary_gateway_id: string | null;
+  gateway: GatewayItem | null;
+  camera_count: number;
+  nvr_count: number;
+  edge_agent_count: number;
 }
 
 export interface GateItem {

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../shared/api/client";
-import type { CameraItem, GateItem, SiteItem } from "../../shared/api/types";
+import type { CameraItem, GateItem, GatewayItem, NvrItem, SiteItem } from "../../shared/api/types";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { Card } from "../../shared/ui/Card";
@@ -45,6 +45,8 @@ export function CamerasPage() {
   const cameras = useQuery({ queryKey: ["cameras"], queryFn: () => api<CameraItem[]>("/cameras") });
   const sites = useQuery({ queryKey: ["sites"], queryFn: () => api<SiteItem[]>("/sites") });
   const gates = useQuery({ queryKey: ["gates"], queryFn: () => api<GateItem[]>("/gates") });
+  const nvrs = useQuery({ queryKey: ["nvrs"], queryFn: () => api<NvrItem[]>("/nvrs") });
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => api<GatewayItem[]>("/gateways") });
 
   if (cameras.isLoading) return <Spinner label="Loading cameras" />;
   if (cameras.isError) return <ErrorState message={cameras.error.message} onRetry={() => void cameras.refetch()} />;
@@ -66,6 +68,8 @@ export function CamerasPage() {
         <CameraForm
           sites={sites.data ?? []}
           gates={gates.data ?? []}
+          nvrs={nvrs.data ?? []}
+          gateways={gateways.data ?? []}
           onClose={() => setOpen(false)}
           onSaved={() => {
             setOpen(false);
@@ -192,16 +196,22 @@ export function CamerasPage() {
 function CameraForm({
   sites,
   gates,
+  nvrs,
+  gateways,
   onClose,
   onSaved,
 }: {
   sites: SiteItem[];
   gates: GateItem[];
+  nvrs: NvrItem[];
+  gateways: GatewayItem[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [siteId, setSiteId] = useState(sites[0]?.id ?? "");
   const siteGates = gates.filter((g) => g.site_id === siteId);
+  const siteNvrs = nvrs.filter((n) => n.site_id === siteId);
+  const siteGateways = gateways.filter((g) => g.site_id === siteId);
   const mutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api("/cameras", { method: "POST", body: JSON.stringify(body) }),
@@ -231,6 +241,11 @@ function CameraForm({
             password: form.get("password") || null,
             stream_type: "RTSP",
             resolution: form.get("resolution") || "1920x1080",
+            source_type: form.get("source_type") || "RTSP",
+            nvr_id: form.get("nvr_id") || null,
+            channel: form.get("channel") || null,
+            gateway_id: form.get("gateway_id") || null,
+            anpr_enabled: form.get("anpr_enabled") === "on",
           });
         }}
       >
@@ -268,6 +283,41 @@ function CameraForm({
         <Field label="Resolution">
           <Input name="resolution" defaultValue="1920x1080" />
         </Field>
+        <Field label="Source">
+          <Select name="source_type" defaultValue="RTSP">
+            <option value="RTSP">RTSP endpoint</option>
+            <option value="NVR_CHANNEL">NVR channel</option>
+            <option value="IP_CAMERA">Direct IP camera</option>
+            <option value="ONVIF">ONVIF</option>
+          </Select>
+        </Field>
+        <Field label="NVR">
+          <Select name="nvr_id">
+            <option value="">None</option>
+            {siteNvrs.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="NVR channel">
+          <Input name="channel" placeholder="101" />
+        </Field>
+        <Field label="Connectivity path">
+          <Select name="gateway_id">
+            <option value="">Site default</option>
+            {siteGateways.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700 md:col-span-2">
+          <input name="anpr_enabled" type="checkbox" defaultChecked className="h-4 w-4" />
+          ANPR enabled
+        </label>
         <Field label="RTSP URL">
           <Input name="rtsp_url" placeholder="rtsp://192.168.1.64:554/Streaming/Channels/101" />
         </Field>

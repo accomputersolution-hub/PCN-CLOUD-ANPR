@@ -6,11 +6,14 @@ from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.enums import AnprDeploymentMode, ConnectivityMode
 
 if TYPE_CHECKING:
     from app.models.camera import Camera
     from app.models.edge_agent import EdgeAgent
     from app.models.gate import Gate
+    from app.models.gateway import Gateway
+    from app.models.nvr import Nvr
     from app.models.organization import Organization
     from app.models.user import User
 
@@ -32,11 +35,20 @@ class Site(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
     settings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    connectivity_mode: Mapped[ConnectivityMode] = mapped_column(
+        String(32), default=ConnectivityMode.EXISTING_VPN_ROUTER, nullable=False
+    )
+    anpr_deployment_mode: Mapped[AnprDeploymentMode] = mapped_column(
+        String(32), default=AnprDeploymentMode.LOCAL_EDGE_AGENT, nullable=False
+    )
+    primary_gateway_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     organization: Mapped[Organization] = relationship(back_populates="sites")
     gates: Mapped[list[Gate]] = relationship(back_populates="site")
     cameras: Mapped[list[Camera]] = relationship(back_populates="site")
     edge_agents: Mapped[list[EdgeAgent]] = relationship(back_populates="site")
+    gateways: Mapped[list[Gateway]] = relationship(back_populates="site")
+    nvrs: Mapped[list[Nvr]] = relationship(back_populates="site")
 
 
 class UserSiteAccess(UUIDPrimaryKeyMixin, Base):

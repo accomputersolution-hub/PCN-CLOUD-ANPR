@@ -21,6 +21,27 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Set `CREDENTIALS_ENCRYPTION_KEY` and a long random `JWT_SECRET`. Never commit `.env`.
 
+### Providers (defaults — keep for local)
+
+```
+AUTH_PROVIDER=jwt
+DATASTORE_PROVIDER=sqlalchemy
+STORAGE_PROVIDER=local
+```
+
+Firebase variables (`FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_CREDENTIALS_FILE`, web client keys) may be left empty for local mode.
+
+**Phase 2 — optional Firebase Storage only** (events still PostgreSQL):
+
+```bash
+cd backend
+pip install -r requirements-firebase.txt
+```
+
+Then set `STORAGE_PROVIDER=firebase` plus project id, bucket, and credentials file. Keep `AUTH_PROVIDER=jwt` and `DATASTORE_PROVIDER=sqlalchemy`. See [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
+
+Setting `AUTH_PROVIDER=firebase` or `DATASTORE_PROVIDER=firestore` without a complete wiring still fails clearly — it does not return mock data.
+
 ## 2. Start PostgreSQL
 
 ```bash
@@ -66,6 +87,8 @@ On first start with `SEED_DEMO_DATA=true`, demo organizations, cameras and mock 
 cd backend
 alembic upgrade head
 ```
+
+Connectivity / gateway tables are in revision `0004_connectivity_gateways`.
 
 Create a new revision (after model changes):
 

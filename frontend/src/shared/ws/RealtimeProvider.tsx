@@ -34,6 +34,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
             void queryClient.invalidateQueries({ queryKey: ["cameras"] });
             void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           }
+          if (msg.type === "gateway.status") {
+            void queryClient.invalidateQueries({ queryKey: ["gateways"] });
+            void queryClient.invalidateQueries({ queryKey: ["connectivity"] });
+          }
         } catch {
           /* ignore malformed frames */
         }

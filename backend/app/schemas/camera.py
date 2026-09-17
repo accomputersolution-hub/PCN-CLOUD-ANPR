@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from app.models.enums import CameraStatus, Direction, StreamType
+from app.models.enums import CameraSourceType, CameraStatus, Direction, StreamType
 from app.schemas.common import ORMModel
 
 
@@ -19,6 +19,11 @@ class CameraCreate(ORMModel):
     stream_type: StreamType = StreamType.RTSP
     resolution: str = "1920x1080"
     enabled: bool = True
+    source_type: CameraSourceType = CameraSourceType.RTSP
+    nvr_id: str | None = None
+    channel: str | None = None
+    anpr_enabled: bool = True
+    gateway_id: str | None = None
 
 
 class CameraUpdate(ORMModel):
@@ -33,6 +38,11 @@ class CameraUpdate(ORMModel):
     stream_type: StreamType | None = None
     resolution: str | None = None
     enabled: bool | None = None
+    source_type: CameraSourceType | None = None
+    nvr_id: str | None = None
+    channel: str | None = None
+    anpr_enabled: bool | None = None
+    gateway_id: str | None = None
 
 
 class CameraOut(ORMModel):
@@ -58,6 +68,12 @@ class CameraOut(ORMModel):
     rtsp_configured: bool = False
     site_name: str | None = None
     gate_name: str | None = None
+    source_type: CameraSourceType = CameraSourceType.RTSP
+    nvr_id: str | None = None
+    channel: str | None = None
+    anpr_enabled: bool = True
+    gateway_id: str | None = None
+    last_seen: datetime | None = None
 
 
 class CameraTestRequest(ORMModel):

@@ -199,6 +199,7 @@ async def heartbeat(
             except ValueError:
                 pass
         camera.last_heartbeat = datetime.now(UTC)
+        camera.last_seen = camera.last_heartbeat
         await hub.publish(
             agent.organization_id,
             "camera.status",

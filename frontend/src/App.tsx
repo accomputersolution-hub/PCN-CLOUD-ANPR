@@ -14,6 +14,7 @@ import { VehicleDetailPage, VehicleSearchPage } from "./features/vehicles/Vehicl
 import { MockAnprPage } from "./features/mock/MockAnprPage";
 import { SitesPage } from "./features/sites/SitesPage";
 import { ReportsPage } from "./features/reports/ReportsPage";
+import { ConnectivityPage } from "./features/connectivity/ConnectivityPage";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -40,6 +41,7 @@ export default function App() {
                   <Route path="/cameras" element={<CamerasPage />} />
                   <Route path="/mock" element={<MockAnprPage />} />
                   <Route path="/sites" element={<SitesPage />} />
+                  <Route path="/connectivity" element={<ConnectivityPage />} />
                   <Route path="/reports" element={<ReportsPage />} />
                 </Route>
               </Route>

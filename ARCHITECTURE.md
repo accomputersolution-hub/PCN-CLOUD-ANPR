@@ -6,14 +6,16 @@ PCN Cloud ANPR is a multi-tenant operations platform. Continuous video analytics
 
 ```
 CCTV / NVR
-  → RTSP / ONVIF
-  → Edge Agent (site)
+  → private LAN
+  → connectivity path (existing VPN router OR PCN Cloud Gateway)
+  → RTSP / ONVIF (never published as public :554 by default)
+  → Edge Agent (site) — ANPR
       → frame capture
       → ANPR engine (replaceable)
-      → local snapshots
+      → confirmed snapshots only
       → SQLite outbox
   → Backend API (when online)
-  → PostgreSQL
+  → PostgreSQL (Firestore adapter planned behind repositories)
   → Web / PWA (management, search, reports)
 ```
 
@@ -31,7 +33,9 @@ Offline: events stay in SQLite. When the WAN returns, `/api/v1/edge/sync` upload
 | Tenant isolation | `organization_id` on tenant tables + query filters in `TenantContext` | Enforced in the API, not only the UI |
 | RBAC | Permission sets per role in `app/core/rbac.py` | Backend 403s even if a route is visible |
 | Realtime | FastAPI WebSocket hub scoped by org (super admin sees all) | Dashboard without polling |
-| Storage | `StorageBackend` + local filesystem | S3-compatible is an extension point, not stubbed as “done” |
+| Storage | `StorageBackend` + local filesystem | Phase 2: `STORAGE_PROVIDER=firebase` uses Admin SDK for evidence blobs; default remains local |
+| Datastore | SQLAlchemy today (`DATASTORE_PROVIDER=sqlalchemy`) | Gateway/NVR/site connectivity + domain records go through `app/repositories` so Firestore can replace PG without rewriting ANPR |
+| Auth providers | `AUTH_PROVIDER=jwt` (live) | `AuthProvider` abstraction; Firebase Auth adapter refuses unconfigured / unwired use |
 | ANPR models | Interfaces `VehicleDetector`, `PlateDetector`, `OCRProvider` + mock providers | No GPL default; PaddleOCR (Apache 2.0) can replace OCR later |
 | Dedup / visits | Site JSON settings: min confidence, duplicate window, cooldown | Configurable without a new table |
 | Timezones | Per-site IANA TZ, default `Asia/Kolkata` | Events store UTC + local timestamp |
@@ -44,10 +48,12 @@ Offline: events stay in SQLite. When the WAN returns, `/api/v1/edge/sync` upload
 ```
 Platform
   → Organization
-      → Site (timezone, retention inherited from org, ANPR thresholds in settings)
+      → Site (timezone, ANPR thresholds, connectivity_mode, anpr_deployment_mode)
           → Gate (ENTRY / EXIT / MIXED)
-              → Camera (ENTRY / EXIT / BOTH)
-          → Edge agent
+              → Camera (IP / NVR channel / RTSP / ONVIF)
+          → NVR (optional)
+          → Gateway (existing VPN router or PCN Cloud Gateway)
+          → Edge agent (ANPR — separate from gateway)
 ```
 
 Super Admin has no `organization_id` and may query all tenants. Every other role is constrained to its organization. Site Manager / Guard / Viewer may be further limited via `user_site_access`.
@@ -91,6 +97,48 @@ CCTV / NVR → RTSP → Edge Agent (FFmpeg) → JPEG frames
 - Phase 6A adds **offline/image** ANPR via `python -m anpr_engine.cli` and `POST /api/v1/anpr/test-image`.
 - Mock ANPR page remains for creating events without cameras.
 - Detectors default to OpenCV heuristics + PaddleOCR (Apache 2.0). No AGPL YOLO by default.
+
+## Connectivity vs ANPR
+
+The Edge Agent is unchanged: RTSP, FFmpeg, PaddleOCR, temporal confirmation, cooldown. Gateways only describe **how the cloud reaches the NVR LAN**. See CONNECTIVITY.md and GATEWAY.md.
+
+## Firebase / cloud migration (Phase 1 — prepared, not switched)
+
+Default providers (keep these for local/dev):
+
+| Concern | Env | Default |
+| --- | --- | --- |
+| Auth | `AUTH_PROVIDER` | `jwt` |
+| Datastore | `DATASTORE_PROVIDER` | `sqlalchemy` (alias: `postgres`) |
+| Storage | `STORAGE_PROVIDER` | `local` |
+
+Abstractions:
+
+```
+AuthProvider
+  ├── JwtAuthProvider          (live)
+  └── FirebaseAuthProvider     (config-checked; not enabled)
+
+Datastore
+  ├── SQLAlchemy repositories  (live)
+  └── Firestore repositories   (structure only; raises until wired)
+
+StorageBackend
+  ├── LocalFilesystemStorage   (default / live)
+  └── FirebaseStorage          (Phase 2 Admin SDK — set STORAGE_PROVIDER=firebase)
+```
+
+- Domain records: `app/domain/connectivity.py`, `app/domain/records.py`
+- Provider helpers: `app/core/providers.py`, `app/auth/`, `app/firebase/`
+- Cost controls: pagination caps, heartbeat throttle helpers (`app/firebase/cost_controls.py`)
+- Example rules: `firestore.rules.example`, `storage.rules.example` (not production-verified)
+- Migration plan: [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md)
+
+Phase 2: confirmed ANPR snapshots/crops can land in Firebase Storage while **event rows stay in PostgreSQL**. Install `backend/requirements-firebase.txt` only when enabling Firebase Storage. Default remains local disk.
+
+IDs remain string UUIDs; every tenant document/row keeps `organization_id` / `site_id`.  
+ANPR evidence = metadata in DB + object-storage keys (never image bytes in Firestore).  
+Do not delete PostgreSQL. ANPR ingest, visits, and the edge pipeline stay on the current stack.
 
 ## Explicitly not in V1 / Phase 6A
 

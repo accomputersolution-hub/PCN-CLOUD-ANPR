@@ -51,6 +51,12 @@ def camera_to_out(camera: Camera) -> dict:
         "rtsp_configured": rtsp_configured(camera),
         "site_name": camera.site.name if getattr(camera, "site", None) is not None else None,
         "gate_name": camera.gate.name if getattr(camera, "gate", None) is not None else None,
+        "source_type": getattr(camera, "source_type", None) or "RTSP",
+        "nvr_id": getattr(camera, "nvr_id", None),
+        "channel": getattr(camera, "channel", None),
+        "anpr_enabled": bool(getattr(camera, "anpr_enabled", True)),
+        "gateway_id": getattr(camera, "gateway_id", None),
+        "last_seen": getattr(camera, "last_seen", None) or camera.last_heartbeat,
     }
 
 

@@ -37,6 +37,27 @@ class Settings(BaseSettings):
 
     redis_url: str | None = None
 
+    # Auth: jwt (current PostgreSQL users + JWT). firebase is prepared, not enabled.
+    auth_provider: str = "jwt"
+
+    # Persistence: sqlalchemy|postgres (current). firestore prepared, not enabled.
+    datastore_provider: str = "sqlalchemy"
+
+    # Firebase (server). Never commit real service-account JSON.
+    firebase_project_id: str = ""
+    firebase_storage_bucket: str = ""
+    firebase_credentials_file: str = ""
+    # Optional inline JSON for CI only; prefer FIREBASE_CREDENTIALS_FILE locally.
+    firebase_credentials_json: str = ""
+
+    # Firebase web client config (for a future SPA SDK). Safe to expose project public keys;
+    # still do not put Admin credentials here.
+    firebase_api_key: str = ""
+    firebase_auth_domain: str = ""
+    firebase_app_id: str = ""
+    firebase_messaging_sender_id: str = ""
+    firebase_measurement_id: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

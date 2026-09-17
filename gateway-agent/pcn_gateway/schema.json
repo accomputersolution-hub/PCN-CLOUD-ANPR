@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PCN Gateway Agent configuration",
+  "type": "object",
+  "required": ["api_base_url", "gateway_id", "device_key", "vpn_provider"],
+  "properties": {
+    "api_base_url": { "type": "string" },
+    "gateway_id": { "type": "string" },
+    "device_key": { "type": "string", "minLength": 12 },
+    "vpn_provider": { "type": "string" },
+    "heartbeat_interval_seconds": { "type": "integer", "minimum": 5 },
+    "lan_subnet": { "type": "string" }
+  }
+}

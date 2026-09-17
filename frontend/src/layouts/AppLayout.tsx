@@ -3,6 +3,7 @@ import {
   Camera,
   LayoutDashboard,
   LogOut,
+  Network,
   Radio,
   Search,
   Settings2,
@@ -64,6 +65,18 @@ export function AppLayout() {
               >
                 <Settings2 size={18} />
                 Sites & gates
+              </NavLink>
+              <NavLink
+                to="/connectivity"
+                className={({ isActive }) =>
+                  clsx(
+                    "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium",
+                    isActive ? "bg-white/10 text-white" : "text-slate-300 hover:bg-white/5",
+                  )
+                }
+              >
+                <Network size={18} />
+                Connectivity
               </NavLink>
               <NavLink
                 to="/reports"

@@ -20,6 +20,8 @@ All application routes are versioned under `/api/v1/`.
 
 Header: `Authorization: Bearer <access_token>`
 
+Auth is served through `AuthProvider` (`AUTH_PROVIDER=jwt` by default). Firebase Auth is prepared behind the same routes but is **not** enabled; selecting it without Admin credentials fails with a validation error.
+
 ## Core
 
 | Method | Path |
@@ -70,6 +72,25 @@ Camera GET responses never include RTSP URLs or passwords. Flags: `credentials_c
 
 Sync body is a list of events with client-generated `id` values. Replays return the same IDs.
 
+Camera GET responses never include RTSP URLs or passwords. Flags: `credentials_configured`, `rtsp_configured`.
+
+## Gateways and NVRs
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| POST | `/gateways` | JWT — returns `device_key` once |
+| GET | `/gateways` | JWT |
+| GET | `/gateways/{id}` | JWT |
+| PATCH | `/gateways/{id}` | JWT |
+| DELETE | `/gateways/{id}` | JWT decommission |
+| POST | `/gateways/{id}/provision` | JWT — rotates device key |
+| POST | `/gateways/{id}/revoke` | JWT |
+| POST | `/gateways/{id}/heartbeat` | `X-Gateway-Id`, `X-Gateway-Key` |
+| GET/POST/PATCH/DELETE | `/nvrs` | JWT |
+| GET/PATCH | `/sites/{site_id}/connectivity` | JWT |
+
+Gateway and NVR JSON never includes device keys, RTSP URLs, or VPN private material (except `device_key` on create/provision only).
+
 ## WebSocket
 
 ```
@@ -83,6 +104,7 @@ Messages:
 { "type": "camera.status", "payload": { "id": "...", "status": "ONLINE" } }
 { "type": "edge.status", "payload": { "id": "...", "status": "CONNECTED" } }
 { "type": "sync.status", "payload": { "agent_id": "...", "accepted": 3 } }
+{ "type": "gateway.status", "payload": { "id": "...", "health_status": "HEALTHY" } }
 ```
 
 In local Vite, the frontend uses `ws://localhost:5173/api/v1/ws` which is proxied.

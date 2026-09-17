@@ -7,7 +7,7 @@ import type { VehicleDetail, VehicleItem } from "../../shared/api/types";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { Card } from "../../shared/ui/Card";
-import { Field, Input } from "../../shared/ui/Field";
+import { Input } from "../../shared/ui/Field";
 import { EmptyState, ErrorState, PageHeader, Spinner } from "../../shared/ui/States";
 
 export function VehicleSearchPage() {

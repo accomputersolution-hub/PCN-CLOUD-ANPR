@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import Field
 
+from app.models.enums import AnprDeploymentMode, ConnectivityMode
 from app.schemas.common import ORMModel
 
 
@@ -29,3 +30,6 @@ class SiteOut(ORMModel):
     timezone: str
     settings: dict[str, Any]
     is_active: bool
+    connectivity_mode: ConnectivityMode = ConnectivityMode.EXISTING_VPN_ROUTER
+    anpr_deployment_mode: AnprDeploymentMode = AnprDeploymentMode.LOCAL_EDGE_AGENT
+    primary_gateway_id: str | None = None

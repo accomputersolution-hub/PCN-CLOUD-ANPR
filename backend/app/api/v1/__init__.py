@@ -12,8 +12,10 @@ from app.api.v1 import (
     edge,
     events,
     gates,
+    gateways,
     health,
     mock,
+    nvrs,
     ops,
     organizations,
     reports,
@@ -34,6 +36,8 @@ api_router.include_router(organizations.router)
 api_router.include_router(sites.router)
 api_router.include_router(gates.router)
 api_router.include_router(cameras.router)
+api_router.include_router(gateways.router)
+api_router.include_router(nvrs.router)
 api_router.include_router(events.router)
 api_router.include_router(vehicles.router)
 api_router.include_router(users.router)

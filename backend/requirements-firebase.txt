@@ -1,0 +1,3 @@
+# Optional — only when STORAGE_PROVIDER=firebase (Phase 2).
+# Keep AUTH_PROVIDER=jwt and DATASTORE_PROVIDER=sqlalchemy for Phase 2.
+firebase-admin>=6.5.0,<8

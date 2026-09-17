@@ -1,0 +1,4 @@
+# Apache 2.0 — PaddleOCR + PaddlePaddle (CPU)
+# Pin PaddlePaddle <=3.2.2 for OCR stability on CPU (3.3.x has known oneDNN issues).
+paddlepaddle==3.2.2
+paddleocr>=2.7.0,<3.8

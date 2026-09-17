@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pcn-postgres
+    environment:
+      POSTGRES_USER: pcn
+      POSTGRES_PASSWORD: pcn
+      POSTGRES_DB: pcn_cloud
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcn -d pcn_cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pcn-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    profiles: ["full"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: pcn-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pcn:pcn@postgres:5432/pcn_cloud
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-jwt-secret-not-for-production}
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      STORAGE_PROVIDER: local
+      STORAGE_PATH: /data/storage
+      CORS_ORIGINS: http://localhost:5173,http://localhost:4173,http://localhost:8080
+      SEED_DEMO_DATA: "true"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: pcn-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  storage_data:

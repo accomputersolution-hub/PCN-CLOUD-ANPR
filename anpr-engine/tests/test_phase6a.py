@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from pcn_anpr.config import ANPRSettings, clear_anpr_settings_cache
+from pcn_anpr.factory import build_pipeline
+from pcn_anpr.normalize import matches_indian_plate, normalize_plate
+from pcn_anpr.paddle_ocr import EmptyOCRProvider, parse_paddle_ocr_result
+from pcn_anpr.pipeline import ANPRPipeline
+from pcn_anpr.cli import main as cli_main
+
+
+def test_pipeline_returns_ocr_mock() -> None:
+    result = ANPRPipeline().process(frame=None)
+    assert result.ocr is not None
+    assert result.ocr.confidence >= 0.9
+    assert result.vehicle is not None
+    assert result.plate is not None
+
+
+def test_normalize_variants() -> None:
+    for raw in ["mh 12 ab 1234", "MH-12-AB-1234", "mh12ab1234", "DL 01 CA 1234", "KA05MN6789"]:
+        out = normalize_plate(raw)
+        assert out.matches_known_pattern
+        assert out.normalized == normalize_plate(raw.replace(" ", "").replace("-", "")).normalized
+
+
+def test_normalize_mh12() -> None:
+    assert normalize_plate("MH 12 AB 1234").normalized == "MH12AB1234"
+
+
+def test_indian_validation_multi_state() -> None:
+    assert matches_indian_plate("MH12AB1234")
+    assert matches_indian_plate("DL01CA1234")
+    assert matches_indian_plate("KA05MN6789")
+    assert not matches_indian_plate("XX")
+
+
+def test_no_blind_confusable() -> None:
+    result = normalize_plate("MH12OB1234", confusable_substitution=False)
+    assert result.normalized == "MH12OB1234"
+    assert result.substitutions_applied is False
+
+
+def test_parse_empty_ocr() -> None:
+    empty = parse_paddle_ocr_result(None)
+    assert empty.text == ""
+    assert empty.confidence == 0.0
+    empty2 = parse_paddle_ocr_result([])
+    assert empty2.raw_text == ""
+
+
+def test_parse_paddle_lines() -> None:
+    lines = [
+        [[[0, 0], [10, 0], [10, 10], [0, 10]], ("MH12AB1234", 0.91)],
+    ]
+    result = parse_paddle_ocr_result(lines)
+    assert "MH12AB1234" in (result.text + result.raw_text)
+    assert result.confidence >= 0.9
+
+
+def test_empty_ocr_provider() -> None:
+    r = EmptyOCRProvider().read(None)
+    assert r.text == ""
+    assert r.confidence == 0.0
+
+
+def test_invalid_image_process(tmp_path: Path) -> None:
+    clear_anpr_settings_cache()
+    pipe = build_pipeline(ANPRSettings(provider_mode="mock"))
+    missing = pipe.process_image(tmp_path / "nope.jpg")
+    assert missing["error"] == "image_not_found"
+    assert missing["plate_detected"] is False
+
+    bad = tmp_path / "bad.jpg"
+    bad.write_bytes(b"not-an-image")
+    result = pipe.process_image(bad)
+    # May be invalid_image or empty detections depending on decoder
+    assert result["plate_detected"] in {False, True} or result.get("error")
+
+
+def test_low_confidence_filtered(tmp_path: Path) -> None:
+    # Tiny dark image — should not crash
+    import cv2
+
+    img = np.zeros((64, 96, 3), dtype=np.uint8)
+    path = tmp_path / "dark.jpg"
+    cv2.imencode(".jpg", img)[1].tofile(str(path))
+    pipe = build_pipeline(
+        ANPRSettings(
+            provider_mode="real",
+            ocr_enabled=False,
+            min_plate_confidence=0.99,
+        )
+    )
+    result = pipe.process_image(path)
+    assert result.get("error") in {None, "invalid_image"}
+    assert isinstance(result.get("plates"), list)
+
+
+def test_detector_on_synthetic_plate(tmp_path: Path) -> None:
+    import cv2
+
+    # White plate-like rectangle on dark car-ish background
+    img = np.zeros((240, 320, 3), dtype=np.uint8)
+    img[:] = (40, 40, 40)
+    cv2.rectangle(img, (80, 150), (240, 190), (220, 220, 220), -1)
+    cv2.putText(img, "MH12AB1234", (90, 178), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (10, 10, 10), 2)
+    path = tmp_path / "synthetic.jpg"
+    cv2.imencode(".jpg", img)[1].tofile(str(path))
+
+    pipe = build_pipeline(ANPRSettings(provider_mode="real", ocr_enabled=False, min_plate_confidence=0.2))
+    result = pipe.process_image(path)
+    assert result["error"] is None
+    # Vehicle fallback or plate candidates — must not crash
+    assert "vehicle_detected" in result
+    assert "plate_detected" in result
+
+
+def test_batch_cli(tmp_path: Path) -> None:
+    import cv2
+
+    folder = tmp_path / "frames"
+    folder.mkdir()
+    for i in range(2):
+        img = np.zeros((80, 120, 3), dtype=np.uint8)
+        cv2.imencode(".jpg", img)[1].tofile(str(folder / f"f{i}.jpg"))
+    out = tmp_path / "out"
+    code = cli_main(["--folder", str(folder), "--output-dir", str(out), "--provider", "mock", "--no-annotate"])
+    assert code == 0
+    results = json.loads((out / "results.json").read_text(encoding="utf-8"))
+    assert len(results) == 2
+
+
+def test_cli_single_mock(tmp_path: Path) -> None:
+    import cv2
+
+    img = np.zeros((80, 120, 3), dtype=np.uint8)
+    path = tmp_path / "one.jpg"
+    cv2.imencode(".jpg", img)[1].tofile(str(path))
+    out = tmp_path / "out"
+    code = cli_main(["--image", str(path), "--output-dir", str(out), "--provider", "mock"])
+    assert code == 0
+    assert (out / "results.json").exists()

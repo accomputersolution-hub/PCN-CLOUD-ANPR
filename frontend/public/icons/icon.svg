@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0f1a2a"/>
+  <rect x="10" y="18" width="44" height="28" rx="6" fill="#0f9d8a"/>
+  <rect x="14" y="22" width="36" height="20" rx="3" fill="#0b1220"/>
+  <text x="32" y="36" text-anchor="middle" font-family="Inter, Arial" font-size="10" font-weight="700" fill="#e8eef8">PCN</text>
+</svg>

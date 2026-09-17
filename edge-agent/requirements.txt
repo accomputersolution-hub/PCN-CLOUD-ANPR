@@ -1,0 +1,3 @@
+httpx==0.28.1
+# System dependency (not pip): FFmpeg must be on PATH for live RTSP (EDGE_MOCK_MODE=false)
+

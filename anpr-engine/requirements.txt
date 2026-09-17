@@ -1,0 +1,9 @@
+# Core (always)
+opencv-python-headless>=4.8.0,<5
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Optional OCR — install separately for real OCR:
+#   pip install -r requirements-ocr.txt
+# PaddleOCR is Apache 2.0. First run downloads model weights into the paddle hub cache
+# (or under ANPR_MODEL_DIR guidance — see models/README.md).

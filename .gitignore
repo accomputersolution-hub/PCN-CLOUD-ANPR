@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+.edge_creds.env
+edge-agent/.edge_creds.env
+
+# Data
+data/
+*.db
+*.sqlite3
+storage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker/volumes/
+
+# Logs
+*.log
+logs/
+
+# Coverage / test artifacts
+coverage/
+.tox/
+
+# ANPR engine outputs / local samples
+anpr-engine/output/
+anpr-engine/testdata/
+edge-agent/data/

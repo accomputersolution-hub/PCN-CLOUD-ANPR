@@ -32,10 +32,15 @@ from app.services.tenant import TenantContext
 router = APIRouter(prefix="/gateways", tags=["gateways"])
 
 
+async def _commit(db: AsyncSession | None) -> None:
+    if db is not None:
+        await db.commit()
+
+
 @router.get("", response_model=list[GatewayOut])
 async def list_gateway_devices(
     site_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_READ)),
 ) -> list[GatewayOut]:
@@ -46,7 +51,7 @@ async def list_gateway_devices(
 async def create_gateway_device(
     body: GatewayCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_WRITE)),
 ) -> GatewayCreated:
@@ -73,7 +78,7 @@ async def create_gateway_device(
         target_id=out.id,
         extra={"device_type": out.device_type, "vendor": out.vendor, "model": out.model},
     )
-    await db.commit()
+    await _commit(db)
     await hub.publish(out.organization_id, "gateway.status", {"id": out.id, "health_status": out.health_status})
     return created_payload(out, device_key)
 
@@ -81,7 +86,7 @@ async def create_gateway_device(
 @router.get("/{gateway_id}", response_model=GatewayOut)
 async def read_gateway_device(
     gateway_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_READ)),
 ) -> GatewayOut:
@@ -93,7 +98,7 @@ async def patch_gateway_device(
     gateway_id: str,
     body: GatewayUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_WRITE)),
 ) -> GatewayOut:
@@ -107,7 +112,7 @@ async def patch_gateway_device(
         target_type="gateway",
         target_id=out.id,
     )
-    await db.commit()
+    await _commit(db)
     await hub.publish(out.organization_id, "gateway.status", {"id": out.id, "health_status": out.health_status})
     return out
 
@@ -116,7 +121,7 @@ async def patch_gateway_device(
 async def delete_gateway_device(
     gateway_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_WRITE)),
 ) -> Response:
@@ -131,7 +136,7 @@ async def delete_gateway_device(
         target_type="gateway",
         target_id=gateway_id,
     )
-    await db.commit()
+    await _commit(db)
     await hub.publish(existing.organization_id, "gateway.status", {"id": gateway_id, "health_status": "REVOKED"})
     return Response(status_code=204)
 
@@ -140,7 +145,7 @@ async def delete_gateway_device(
 async def provision_gateway_device(
     gateway_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_PROVISION)),
 ) -> GatewayCreated:
@@ -155,7 +160,7 @@ async def provision_gateway_device(
         target_id=out.id,
         extra={"config_version": out.config_version},
     )
-    await db.commit()
+    await _commit(db)
     return created_payload(out, device_key)
 
 
@@ -163,7 +168,7 @@ async def provision_gateway_device(
 async def revoke_gateway_device(
     gateway_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATEWAY_PROVISION)),
 ) -> GatewayOut:
@@ -177,7 +182,7 @@ async def revoke_gateway_device(
         target_type="gateway",
         target_id=out.id,
     )
-    await db.commit()
+    await _commit(db)
     await hub.publish(out.organization_id, "gateway.status", {"id": out.id, "health_status": out.health_status})
     return out
 
@@ -186,7 +191,7 @@ async def revoke_gateway_device(
 async def gateway_heartbeat(
     gateway_id: str,
     body: GatewayHeartbeatRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     device: GatewayRecord = Depends(require_gateway_device),
 ) -> GatewayOut:
     if device.id != gateway_id:
@@ -194,7 +199,7 @@ async def gateway_heartbeat(
 
         raise ForbiddenError("Gateway id mismatch")
     out = await apply_heartbeat(db, device, body)
-    await db.commit()
+    await _commit(db)
     await hub.publish(
         out.organization_id,
         "gateway.status",

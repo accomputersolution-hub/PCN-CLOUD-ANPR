@@ -103,10 +103,20 @@ def require_sqlalchemy_datastore(settings: Settings | None = None) -> None:
         return
     if provider == "firestore":
         raise ValidationAppError(
-            "Firestore datastore is not enabled yet. Keep DATASTORE_PROVIDER=sqlalchemy "
-            "(or postgres). Configure FIREBASE_* and implement the adapter before switching.",
+            "SQLAlchemy datastore is legacy; DATASTORE_PROVIDER is firestore",
         )
     raise ValidationAppError(f"Unknown DATASTORE_PROVIDER: {provider}")
+
+
+def require_firestore_datastore(settings: Settings | None = None) -> None:
+    """Ensure Firestore datastore mode and Firebase Admin credentials are ready."""
+    s = settings or get_settings()
+    provider = normalize_datastore_provider(s.datastore_provider)
+    if provider != "firestore":
+        raise ValidationAppError(
+            f"Firestore datastore required; DATASTORE_PROVIDER is {provider}",
+        )
+    require_firebase_admin_for("Firestore datastore", s)
 
 
 def require_firebase_admin_for(purpose: str, settings: Settings | None = None) -> None:

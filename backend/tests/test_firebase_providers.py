@@ -38,15 +38,15 @@ def _reset_settings(monkeypatch: pytest.MonkeyPatch):
     reset_storage_cache()
 
 
-def test_default_providers_are_local_stack(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
-    monkeypatch.setenv("DATASTORE_PROVIDER", "sqlalchemy")
-    monkeypatch.setenv("STORAGE_PROVIDER", "local")
+def test_default_providers_are_firebase_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+    monkeypatch.delenv("DATASTORE_PROVIDER", raising=False)
+    monkeypatch.delenv("STORAGE_PROVIDER", raising=False)
     get_settings.cache_clear()
     selected = current_providers()
-    assert selected.auth == "jwt"
-    assert selected.datastore == "sqlalchemy"
-    assert selected.storage == "local"
+    assert selected.auth == "firebase"
+    assert selected.datastore == "firestore"
+    assert selected.storage == "firebase"
 
 
 def test_postgres_alias_maps_to_sqlalchemy() -> None:
@@ -93,16 +93,16 @@ def test_firebase_client_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     assert firebase_client_configured() is True
 
 
-def test_sqlalchemy_datastore_required_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlalchemy_datastore_required_when_selected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATASTORE_PROVIDER", "sqlalchemy")
     get_settings.cache_clear()
     require_sqlalchemy_datastore()
 
 
-def test_firestore_provider_rejected_until_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlalchemy_rejected_when_firestore_selected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATASTORE_PROVIDER", "firestore")
     get_settings.cache_clear()
-    with pytest.raises(ValidationAppError, match="not enabled yet"):
+    with pytest.raises(ValidationAppError, match="SQLAlchemy datastore is legacy"):
         require_sqlalchemy_datastore()
 
 
@@ -128,14 +128,45 @@ def test_firebase_auth_provider_requires_config(monkeypatch: pytest.MonkeyPatch)
         get_auth_provider()
 
 
-def test_firebase_auth_provider_configured_but_not_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_firebase_auth_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.auth.providers import FirebaseAuthProvider
 
-    monkeypatch.setenv("FIREBASE_PROJECT_ID", "pcn-demo")
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "pcn-anpr")
     monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", "/tmp/sa.json")
+    monkeypatch.setenv("FIREBASE_API_KEY", "")
     get_settings.cache_clear()
+    with pytest.raises(ValidationAppError, match="FIREBASE_API_KEY"):
+        FirebaseAuthProvider()
+
+
+def test_firebase_auth_verify_rejects_invalid_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.auth.providers import FirebaseAuthProvider
+    from app.core.exceptions import UnauthorizedError
+
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "pcn-anpr")
+    monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", "/tmp/sa.json")
+    monkeypatch.setenv("FIREBASE_API_KEY", "web-api-key")
+    get_settings.cache_clear()
+
+    monkeypatch.setattr("app.auth.providers.get_firebase_admin_app", lambda: object())
+
+    class _Auth:
+        @staticmethod
+        def verify_id_token(_token: str, app=None, clock_skew_seconds=0, **_kwargs):
+            raise ValueError("bad token")
+
+    import sys
+    from types import ModuleType
+
+    fake_fb = ModuleType("firebase_admin")
+    fake_auth = ModuleType("firebase_admin.auth")
+    fake_auth.verify_id_token = _Auth.verify_id_token
+    fake_fb.auth = fake_auth
+    monkeypatch.setitem(sys.modules, "firebase_admin", fake_fb)
+    monkeypatch.setitem(sys.modules, "firebase_admin.auth", fake_auth)
+
     provider = FirebaseAuthProvider()
-    with pytest.raises(ValidationAppError, match="not enabled yet"):
+    with pytest.raises(UnauthorizedError, match="Invalid Firebase ID token"):
         provider.verify_id_token("fake-token")
 
 
@@ -150,12 +181,13 @@ async def test_firestore_repo_fails_without_credentials(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_firestore_repo_fails_clearly_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FIREBASE_PROJECT_ID", "pcn-demo")
-    monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", "/tmp/sa.json")
+async def test_firestore_repo_requires_credentials_even_when_provider_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATASTORE_PROVIDER", "firestore")
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "")
+    monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", "")
     get_settings.cache_clear()
     repo = FirestoreAnprEventRepository()
-    with pytest.raises(ValidationAppError, match="not enabled yet"):
+    with pytest.raises(ValidationAppError, match="Firebase Admin is not configured"):
         await repo.list_for_tenant(organization_id="org-1", limit=10)
 
 

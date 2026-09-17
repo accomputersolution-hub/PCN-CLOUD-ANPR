@@ -6,25 +6,39 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationAppError
+from app.core.runtime import is_firestore
 from app.domain.connectivity import NvrRecord
 from app.models.camera import Camera
 from app.models.site import Site
-from app.repositories import gateway_repo, nvr_repo
+from app.repositories import camera_repo, gateway_repo, nvr_repo, site_repo
 from app.schemas.nvr import NvrOut, NvrUpdate
 from app.services.gateway import load_site_for_ctx
 from app.services.tenant import TenantContext
 
 
-async def _to_out(db: AsyncSession, record: NvrRecord) -> NvrOut:
-    cameras = int((await db.execute(select(func.count(Camera.id)).where(Camera.nvr_id == record.id))).scalar_one())
-    site = await db.get(Site, record.site_id)
+async def _to_out(db: AsyncSession | None, record: NvrRecord) -> NvrOut:
+    if is_firestore() or db is None:
+        cameras = await camera_repo(db).list_for_tenant(
+            organization_id=record.organization_id,
+            site_ids=None,
+            site_id=record.site_id,
+        )
+        cam_count = sum(1 for c in cameras if c.nvr_id == record.id)
+        site = await site_repo(db).get(record.site_id)
+        site_name = site.name if site else None
+    else:
+        cam_count = int(
+            (await db.execute(select(func.count(Camera.id)).where(Camera.nvr_id == record.id))).scalar_one()
+        )
+        site = await db.get(Site, record.site_id)
+        site_name = site.name if site else None
     return NvrOut.model_validate(
-        {**record.model_dump(), "camera_count": cameras, "site_name": site.name if site else None}
+        {**record.model_dump(), "camera_count": cam_count, "site_name": site_name}
     )
 
 
 async def create_nvr(
-    db: AsyncSession,
+    db: AsyncSession | None,
     ctx: TenantContext,
     *,
     site_id: str,
@@ -59,7 +73,7 @@ async def create_nvr(
     return await _to_out(db, saved)
 
 
-async def list_nvrs(db: AsyncSession, ctx: TenantContext, site_id: str | None = None) -> list[NvrOut]:
+async def list_nvrs(db: AsyncSession | None, ctx: TenantContext, site_id: str | None = None) -> list[NvrOut]:
     if site_id:
         await load_site_for_ctx(db, ctx, site_id)
     org_id = None if ctx.is_super else ctx.organization_id
@@ -71,7 +85,7 @@ async def list_nvrs(db: AsyncSession, ctx: TenantContext, site_id: str | None = 
     return [await _to_out(db, r) for r in records]
 
 
-async def get_nvr(db: AsyncSession, ctx: TenantContext, nvr_id: str) -> NvrOut:
+async def get_nvr(db: AsyncSession | None, ctx: TenantContext, nvr_id: str) -> NvrOut:
     record = await nvr_repo(db).get(nvr_id)
     if record is None:
         raise NotFoundError("NVR not found")
@@ -80,7 +94,7 @@ async def get_nvr(db: AsyncSession, ctx: TenantContext, nvr_id: str) -> NvrOut:
     return await _to_out(db, record)
 
 
-async def update_nvr(db: AsyncSession, ctx: TenantContext, nvr_id: str, body: NvrUpdate) -> NvrOut:
+async def update_nvr(db: AsyncSession | None, ctx: TenantContext, nvr_id: str, body: NvrUpdate) -> NvrOut:
     record = await nvr_repo(db).get(nvr_id)
     if record is None:
         raise NotFoundError("NVR not found")
@@ -97,7 +111,7 @@ async def update_nvr(db: AsyncSession, ctx: TenantContext, nvr_id: str, body: Nv
     return await _to_out(db, saved)
 
 
-async def delete_nvr(db: AsyncSession, ctx: TenantContext, nvr_id: str) -> None:
+async def delete_nvr(db: AsyncSession | None, ctx: TenantContext, nvr_id: str) -> None:
     record = await nvr_repo(db).get(nvr_id)
     if record is None:
         raise NotFoundError("NVR not found")

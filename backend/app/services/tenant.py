@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import Select, select
@@ -8,18 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from app.core.exceptions import ForbiddenError
+from app.identity.principal import Principal
 from app.models.enums import UserRole
 from app.models.user import User
 
 
 class TenantContext:
-    def __init__(self, user: User, site_ids: list[str]) -> None:
+    def __init__(self, user: Principal | User, site_ids: list[str]) -> None:
         self.user = user
         self.site_ids = site_ids
 
     @property
     def is_super(self) -> bool:
-        return self.user.role == UserRole.SUPER_ADMIN
+        return _role_of(self.user) == UserRole.SUPER_ADMIN
 
     @property
     def organization_id(self) -> str | None:
@@ -58,11 +58,31 @@ class TenantContext:
         return stmt
 
 
-async def load_site_ids(db: AsyncSession, user: User) -> list[str]:
+def _role_of(user: Principal | User) -> UserRole:
+    """Resolve role via Principal.role_enum when present, else ORM User.role."""
+    if isinstance(user, Principal):
+        return user.role_enum
+    role = getattr(user, "role_enum", None)
+    if role is not None:
+        return role if isinstance(role, UserRole) else UserRole(str(role))
+    return user.role if isinstance(user.role, UserRole) else UserRole(str(user.role))
+
+
+async def load_site_ids(db: AsyncSession | None, user: Principal | User) -> list[str]:
+    role = _role_of(user)
+    if role in {UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN}:
+        return []
+
+    if isinstance(user, Principal):
+        if user.site_ids:
+            return list(user.site_ids)
+        return []
+
+    if db is None:
+        return []
+
     from app.models.site import UserSiteAccess
 
-    if user.role in {UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN}:
-        return []
     rows = (
         await db.execute(select(UserSiteAccess.site_id).where(UserSiteAccess.user_id == user.id))
     ).scalars().all()

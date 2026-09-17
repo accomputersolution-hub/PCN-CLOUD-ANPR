@@ -54,5 +54,14 @@ def firebase_admin_ready(settings: Settings | None = None) -> bool:
 
 
 def reset_firebase_admin_cache() -> None:
-    """Test helper — clear cached Admin app factory."""
+    """Test/helper — clear cached Admin app factory and delete initialized apps."""
     get_firebase_admin_app.cache_clear()
+    try:
+        import firebase_admin
+    except ImportError:  # pragma: no cover
+        return
+    for name in list(getattr(firebase_admin, "_apps", {}) or {}):
+        try:
+            firebase_admin.delete_app(firebase_admin.get_app(name))
+        except Exception:  # noqa: BLE001
+            pass

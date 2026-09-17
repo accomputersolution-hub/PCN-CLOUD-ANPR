@@ -5,11 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import client_ip, get_db, get_tenant, require_permission
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.enums import AuditAction, UserRole
 from app.models.organization import Organization
+from app.repositories import organization_repo
 from app.schemas.organization import OrganizationCreate, OrganizationOut, OrganizationUpdate
+from app.services import firestore_domain as fs
 from app.services.audit import write_audit
 from app.services.tenant import TenantContext
 
@@ -18,10 +21,14 @@ router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 @router.get("", response_model=list[OrganizationOut])
 async def list_orgs(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.ORG_READ)),
 ) -> list[OrganizationOut]:
+    if is_firestore():
+        rows = await fs.list_organizations(ctx)
+        return [OrganizationOut.model_validate(r) for r in rows]
+    assert db is not None
     stmt = select(Organization).order_by(Organization.name)
     if not ctx.is_super:
         stmt = stmt.where(Organization.id == ctx.organization_id)
@@ -33,10 +40,26 @@ async def list_orgs(
 async def create_org(
     body: OrganizationCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.PLATFORM_ADMIN)),
 ) -> OrganizationOut:
+    if is_firestore():
+        org = await fs.create_organization(
+            name=body.name, slug=body.slug, retention_days=body.retention_days
+        )
+        await write_audit(
+            db,
+            action=AuditAction.ORGANIZATION_CREATE,
+            user_id=ctx.user.id,
+            organization_id=org.id,
+            ip=client_ip(request),
+            target_type="organization",
+            target_id=org.id,
+        )
+        return OrganizationOut.model_validate(org)
+
+    assert db is not None
     exists = (await db.execute(select(Organization).where(Organization.slug == body.slug))).scalar_one_or_none()
     if exists:
         raise ConflictError("Organization slug already exists")
@@ -62,19 +85,41 @@ async def update_org(
     org_id: str,
     body: OrganizationUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
 ) -> OrganizationOut:
+    if is_firestore():
+        org = await organization_repo().get(org_id)
+        if not org:
+            raise NotFoundError("Organization not found")
+        if ctx.user.role_enum == UserRole.SUPER_ADMIN:
+            pass
+        elif ctx.user.role_enum == UserRole.ORG_ADMIN:
+            ctx.ensure_org(org.id)
+        else:
+            raise ForbiddenError()
+        data = body.model_dump(exclude_unset=True)
+        updated = await fs.update_organization(org_id, data)
+        await write_audit(
+            db,
+            action=AuditAction.ORGANIZATION_UPDATE,
+            user_id=ctx.user.id,
+            organization_id=updated.id,
+            ip=client_ip(request),
+            target_type="organization",
+            target_id=updated.id,
+        )
+        return OrganizationOut.model_validate(updated)
+
+    assert db is not None
     org = await db.get(Organization, org_id)
     if not org:
         raise NotFoundError("Organization not found")
-    if ctx.user.role == UserRole.SUPER_ADMIN:
+    if ctx.user.role_enum == UserRole.SUPER_ADMIN:
         pass
-    elif ctx.user.role == UserRole.ORG_ADMIN:
+    elif ctx.user.role_enum == UserRole.ORG_ADMIN:
         ctx.ensure_org(org.id)
     else:
-        from app.core.exceptions import ForbiddenError
-
         raise ForbiddenError()
     data = body.model_dump(exclude_unset=True)
     for key, value in data.items():

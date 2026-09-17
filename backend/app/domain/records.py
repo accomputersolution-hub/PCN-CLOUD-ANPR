@@ -1,7 +1,6 @@
-"""Datastore-agnostic domain records for future Firestore documents.
+"""Datastore-agnostic domain records (Firestore source of truth).
 
-SQLAlchemy remains the live persistence layer. These records define the
-fields we intend to store in Firestore (metadata only — no image bytes).
+Image bytes are never stored in these records — only storage object keys.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class SiteRecord(BaseModel):
 
 
 class UserProfileRecord(BaseModel):
-    """App profile linked to AUTH_PROVIDER identity (JWT user id or Firebase uid)."""
+    """App profile keyed by Firebase Auth uid (document id = uid)."""
 
     id: str
     organization_id: str | None = None
@@ -43,8 +42,18 @@ class UserProfileRecord(BaseModel):
     role: str
     is_active: bool = True
     site_ids: list[str] = Field(default_factory=list)
-    auth_provider: str = "jwt"
+    auth_provider: str = "firebase"
     firebase_uid: str | None = None
+    last_login_at: datetime | None = None
+
+
+class GateRecord(BaseModel):
+    id: str
+    organization_id: str
+    site_id: str
+    name: str
+    mode: str = "MIXED"
+    is_active: bool = True
 
 
 class CameraRecord(BaseModel):
@@ -63,9 +72,20 @@ class CameraRecord(BaseModel):
     status: str = "UNKNOWN"
     enabled: bool = True
     anpr_enabled: bool = True
+    streaming: bool = False
+    resolution: str = "1920x1080"
+    onvif_ip: str | None = None
     last_seen: datetime | None = None
-    # Secrets stay encrypted / out of Firestore client responses.
+    last_heartbeat: datetime | None = None
+    last_frame_at: datetime | None = None
+    fps: float | None = None
+    connection_error: str | None = None
+    retry_count: int = 0
     has_credentials: bool = False
+    # Server-only Fernet ciphertext (never returned to clients; rules deny client writes).
+    rtsp_url_encrypted: str | None = None
+    username_encrypted: str | None = None
+    password_encrypted: str | None = None
 
 
 class VehicleRecord(BaseModel):
@@ -76,6 +96,8 @@ class VehicleRecord(BaseModel):
     last_seen: datetime
     total_visits: int = 0
     currently_inside: bool = False
+    visitor_note: str | None = None
+    classification: str | None = None
 
 
 class AnprEventRecord(BaseModel):
@@ -97,7 +119,6 @@ class AnprEventRecord(BaseModel):
     vehicle_detection_confidence: float = 0.0
     timestamp: datetime
     local_timestamp: datetime
-    # Storage object keys (Firebase Storage / local), never embedded image data.
     snapshot_storage_key: str | None = None
     plate_crop_storage_key: str | None = None
     vehicle_crop_storage_key: str | None = None
@@ -106,3 +127,41 @@ class AnprEventRecord(BaseModel):
     sync_status: str = "SYNCED"
     classification: str | None = None
     notes: str | None = None
+
+
+class EdgeAgentRecord(BaseModel):
+    id: str
+    organization_id: str
+    site_id: str
+    name: str = ""
+    agent_key_hash: str
+    status: str = "OFFLINE"
+    last_seen: datetime | None = None
+    last_sync_at: datetime | None = None
+    cpu_usage: float | None = None
+    memory_usage: float | None = None
+    queue_size: int = 0
+    is_active: bool = True
+
+
+class VisitRecord(BaseModel):
+    id: str
+    organization_id: str
+    site_id: str
+    vehicle_id: str
+    plate_normalized: str
+    entry_event_id: str | None = None
+    exit_event_id: str | None = None
+    entry_at: datetime | None = None
+    exit_at: datetime | None = None
+    gate_id: str | None = None
+    duration_seconds: int | None = None
+    status: str = "OPEN"
+
+
+class RefreshTokenRecord(BaseModel):
+    id: str
+    user_id: str
+    token_hash: str
+    expires_at: datetime
+    revoked: bool = False

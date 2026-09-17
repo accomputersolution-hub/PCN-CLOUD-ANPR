@@ -7,10 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import client_ip, get_db, get_tenant, require_permission
 from app.core.exceptions import NotFoundError
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.enums import AuditAction
 from app.models.gate import Gate
 from app.models.site import Site
 from app.schemas.gate import GateCreate, GateOut, GateUpdate
+from app.services import firestore_domain as fs
 from app.services.audit import write_audit
 from app.services.tenant import TenantContext
 
@@ -20,10 +22,14 @@ router = APIRouter(prefix="/gates", tags=["gates"])
 @router.get("", response_model=list[GateOut])
 async def list_gates(
     site_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATE_READ)),
 ) -> list[GateOut]:
+    if is_firestore():
+        rows = await fs.list_gates(ctx, site_id=site_id)
+        return [GateOut.model_validate(r) for r in rows]
+    assert db is not None
     stmt = select(Gate).order_by(Gate.name)
     stmt = ctx.apply_org(stmt, Gate.organization_id)
     stmt = ctx.apply_site(stmt, Gate.site_id)
@@ -38,10 +44,24 @@ async def list_gates(
 async def create_gate(
     body: GateCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATE_WRITE)),
 ) -> GateOut:
+    if is_firestore():
+        gate = await fs.create_gate(ctx, site_id=body.site_id, name=body.name, mode=str(body.mode))
+        await write_audit(
+            db,
+            action=AuditAction.GATE_CREATE,
+            user_id=ctx.user.id,
+            organization_id=gate.organization_id,
+            ip=client_ip(request),
+            target_type="gate",
+            target_id=gate.id,
+        )
+        return GateOut.model_validate(gate)
+
+    assert db is not None
     site = await db.get(Site, body.site_id)
     if not site:
         raise NotFoundError("Site not found")
@@ -69,10 +89,24 @@ async def update_gate(
     gate_id: str,
     body: GateUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATE_WRITE)),
 ) -> GateOut:
+    if is_firestore():
+        gate = await fs.update_gate(ctx, gate_id, body.model_dump(exclude_unset=True))
+        await write_audit(
+            db,
+            action=AuditAction.GATE_UPDATE,
+            user_id=ctx.user.id,
+            organization_id=gate.organization_id,
+            ip=client_ip(request),
+            target_type="gate",
+            target_id=gate.id,
+        )
+        return GateOut.model_validate(gate)
+
+    assert db is not None
     gate = await db.get(Gate, gate_id)
     if not gate:
         raise NotFoundError("Gate not found")
@@ -99,10 +133,29 @@ async def update_gate(
 async def delete_gate(
     gate_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.GATE_WRITE)),
 ) -> Response:
+    if is_firestore():
+        from app.repositories import gate_repo
+
+        gate = await gate_repo().get(gate_id)
+        if not gate:
+            raise NotFoundError("Gate not found")
+        await write_audit(
+            db,
+            action=AuditAction.GATE_DELETE,
+            user_id=ctx.user.id,
+            organization_id=gate.organization_id,
+            ip=client_ip(request),
+            target_type="gate",
+            target_id=gate.id,
+        )
+        await fs.delete_gate(ctx, gate_id)
+        return Response(status_code=204)
+
+    assert db is not None
     gate = await db.get(Gate, gate_id)
     if not gate:
         raise NotFoundError("Gate not found")

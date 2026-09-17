@@ -1,7 +1,9 @@
 rules_version = '2';
 
-// EXAMPLE / mirror of deployed firestore.rules for pcn-anpr.
-// Backend Admin SDK bypasses these rules. Client writes denied.
+// Tenant-isolated client rules for PCN Cloud ANPR (pcn-anpr).
+// Backend Admin SDK bypasses these rules. Client writes are denied;
+// privileged writes go through the FastAPI backend.
+// ruleset-rev: tenant-isolation-2026-09-17c
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -46,6 +48,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /gates/{gateId} {
+      allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
+        && siteAllowed(resource.data.site_id);
+      allow write: if false;
+    }
+
     match /gateways/{gatewayId} {
       allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
         && siteAllowed(resource.data.site_id);
@@ -69,7 +77,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /vehicleVisits/{visitId} {
+      allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
+        && siteAllowed(resource.data.site_id);
+      allow write: if false;
+    }
+
     match /anprEvents/{eventId} {
+      allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
+        && siteAllowed(resource.data.site_id);
+      allow write: if false;
+    }
+
+    match /edgeAgents/{agentId} {
       allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
         && siteAllowed(resource.data.site_id);
       allow write: if false;
@@ -84,6 +104,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Refresh tokens are server-only (Admin SDK). Deny all client access.
+    match /refreshTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
+    // Deny smoke/test leftovers to clients; Admin SDK still manages them.
     match /_smoke/{docId} {
       allow read, write: if false;
     }

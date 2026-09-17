@@ -9,6 +9,10 @@ os.environ.setdefault("SEED_DEMO_DATA", "false")
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-not-for-production-use")
 os.environ.setdefault("CREDENTIALS_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 os.environ.setdefault("STORAGE_PATH", str(Path("./data/test-storage").resolve()))
+# Legacy SQLAlchemy integration tests (Firebase-first is the runtime default).
+os.environ.setdefault("AUTH_PROVIDER", "jwt")
+os.environ.setdefault("DATASTORE_PROVIDER", "sqlalchemy")
+os.environ.setdefault("STORAGE_PROVIDER", "local")
 
 import pytest
 from httpx import ASGITransport, AsyncClient

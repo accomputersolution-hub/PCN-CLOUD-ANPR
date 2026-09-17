@@ -14,10 +14,15 @@ from app.services.tenant import TenantContext
 router = APIRouter(prefix="/nvrs", tags=["nvrs"])
 
 
+async def _commit(db: AsyncSession | None) -> None:
+    if db is not None:
+        await db.commit()
+
+
 @router.get("", response_model=list[NvrOut])
 async def list_nvr_devices(
     site_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.NVR_READ)),
 ) -> list[NvrOut]:
@@ -28,7 +33,7 @@ async def list_nvr_devices(
 async def create_nvr_device(
     body: NvrCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.NVR_WRITE)),
 ) -> NvrOut:
@@ -54,14 +59,14 @@ async def create_nvr_device(
         target_type="nvr",
         target_id=out.id,
     )
-    await db.commit()
+    await _commit(db)
     return out
 
 
 @router.get("/{nvr_id}", response_model=NvrOut)
 async def get_nvr_device(
     nvr_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.NVR_READ)),
 ) -> NvrOut:
@@ -73,7 +78,7 @@ async def patch_nvr_device(
     nvr_id: str,
     body: NvrUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.NVR_WRITE)),
 ) -> NvrOut:
@@ -87,7 +92,7 @@ async def patch_nvr_device(
         target_type="nvr",
         target_id=out.id,
     )
-    await db.commit()
+    await _commit(db)
     return out
 
 
@@ -95,7 +100,7 @@ async def patch_nvr_device(
 async def delete_nvr_device(
     nvr_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.NVR_WRITE)),
 ) -> Response:
@@ -110,5 +115,5 @@ async def delete_nvr_device(
         target_type="nvr",
         target_id=nvr_id,
     )
-    await db.commit()
+    await _commit(db)
     return Response(status_code=204)

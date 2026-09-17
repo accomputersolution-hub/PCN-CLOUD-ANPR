@@ -10,11 +10,13 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import client_ip, get_db, get_tenant, require_permission
 from app.core.exceptions import NotFoundError
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.anpr_event import AnprEvent
 from app.models.enums import AuditAction, Direction
 from app.models.site import Site
 from app.schemas.common import PageMeta, Paginated
 from app.schemas.event import EventClassifyRequest, EventCorrectRequest, EventOut
+from app.services import firestore_domain as fs
 from app.services.audit import write_audit
 from app.services.event import serialize_event
 from app.services.plate import normalize_plate
@@ -72,10 +74,28 @@ async def list_events(
     date_to: datetime | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.EVENT_READ)),
 ) -> Paginated[EventOut]:
+    if is_firestore():
+        items, total = await fs.list_events(
+            ctx,
+            site_id=site_id,
+            organization_id=organization_id,
+            plate=plate,
+            direction=direction,
+            camera_id=camera_id,
+            gate_id=gate_id,
+            page=page,
+            page_size=page_size,
+        )
+        return Paginated(
+            items=[EventOut.model_validate(i) for i in items],
+            meta=PageMeta(total=total, page=page, page_size=page_size),
+        )
+
+    assert db is not None
     stmt = select(AnprEvent).options(selectinload(AnprEvent.camera), selectinload(AnprEvent.gate))
     stmt = _filters(
         stmt,
@@ -106,10 +126,13 @@ async def list_events(
 @router.get("/{event_id}", response_model=EventOut)
 async def get_event(
     event_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.EVENT_READ)),
 ) -> EventOut:
+    if is_firestore():
+        return EventOut.model_validate(await fs.get_event(ctx, event_id))
+    assert db is not None
     stmt = (
         select(AnprEvent)
         .options(selectinload(AnprEvent.camera), selectinload(AnprEvent.gate))
@@ -129,10 +152,29 @@ async def correct_event(
     event_id: str,
     body: EventCorrectRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.EVENT_CORRECT)),
 ) -> EventOut:
+    if is_firestore():
+        from app.repositories import anpr_event_repo
+
+        existing = await anpr_event_repo().get(event_id)
+        previous = existing.plate_normalized if existing else None
+        out = await fs.correct_event(ctx, event_id, body.plate_text)
+        await write_audit(
+            db,
+            action=AuditAction.EVENT_CORRECT,
+            user_id=ctx.user.id,
+            organization_id=out["organization_id"],
+            ip=client_ip(request),
+            target_type="anpr_event",
+            target_id=event_id,
+            extra={"from": previous, "to": out["plate_normalized"]},
+        )
+        return EventOut.model_validate(out)
+
+    assert db is not None
     event = await db.get(AnprEvent, event_id)
     if not event:
         raise NotFoundError("Event not found")
@@ -159,10 +201,27 @@ async def classify_event(
     event_id: str,
     body: EventClassifyRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.EVENT_CLASSIFY)),
 ) -> EventOut:
+    if is_firestore():
+        out = await fs.classify_event(
+            ctx, event_id, classification=body.classification, notes=body.notes
+        )
+        await write_audit(
+            db,
+            action=AuditAction.EVENT_CLASSIFY,
+            user_id=ctx.user.id,
+            organization_id=out["organization_id"],
+            ip=client_ip(request),
+            target_type="anpr_event",
+            target_id=event_id,
+            extra={"classification": body.classification},
+        )
+        return EventOut.model_validate(out)
+
+    assert db is not None
     event = await db.get(AnprEvent, event_id)
     if not event:
         raise NotFoundError("Event not found")
@@ -187,10 +246,29 @@ async def classify_event(
 async def delete_event(
     event_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.EVENT_DELETE)),
 ) -> Response:
+    if is_firestore():
+        from app.repositories import anpr_event_repo
+
+        event = await anpr_event_repo().get(event_id)
+        if not event:
+            raise NotFoundError("Event not found")
+        await write_audit(
+            db,
+            action=AuditAction.EVENT_DELETE,
+            user_id=ctx.user.id,
+            organization_id=event.organization_id,
+            ip=client_ip(request),
+            target_type="anpr_event",
+            target_id=event.id,
+        )
+        await fs.delete_event(ctx, event_id)
+        return Response(status_code=204)
+
+    assert db is not None
     event = await db.get(AnprEvent, event_id)
     if not event:
         raise NotFoundError("Event not found")

@@ -25,6 +25,10 @@ dist-ssr/
 !.env.example
 .edge_creds.env
 edge-agent/.edge_creds.env
+**/serviceAccount*.json
+**/firebase-adminsdk*.json
+secrets/
+.firebase/
 
 # Data
 data/

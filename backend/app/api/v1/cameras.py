@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import client_ip, get_db, get_tenant, require_permission
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.camera import Camera
 from app.models.enums import AuditAction, CameraStatus
 from app.models.gate import Gate
@@ -24,6 +25,7 @@ from app.schemas.camera import (
     CameraUpdate,
     EnableBody,
 )
+from app.services import firestore_domain as fs
 from app.services.audit import write_audit
 from app.services.camera import (
     camera_to_out,
@@ -65,10 +67,14 @@ async def _bind_nvr_and_gateway(db: AsyncSession, site_id: str, nvr_id: str | No
 @router.get("", response_model=list[CameraOut])
 async def list_cameras(
     site_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_READ)),
 ) -> list[CameraOut]:
+    if is_firestore():
+        rows = await fs.list_cameras(ctx, site_id=site_id)
+        return [CameraOut.model_validate(r) for r in rows]
+    assert db is not None
     stmt = select(Camera).options(selectinload(Camera.site), selectinload(Camera.gate)).order_by(Camera.name)
     stmt = ctx.apply_org(stmt, Camera.organization_id)
     stmt = ctx.apply_site(stmt, Camera.site_id)
@@ -81,10 +87,14 @@ async def list_cameras(
 
 @router.get("/status", response_model=list[CameraStatusOut])
 async def camera_status(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_READ)),
 ) -> list[CameraStatusOut]:
+    if is_firestore():
+        rows = await fs.list_cameras(ctx)
+        return [CameraStatusOut.model_validate(r) for r in rows]
+    assert db is not None
     stmt = select(Camera)
     stmt = ctx.apply_org(stmt, Camera.organization_id)
     stmt = ctx.apply_site(stmt, Camera.site_id)
@@ -95,10 +105,13 @@ async def camera_status(
 @router.get("/{camera_id}", response_model=CameraOut)
 async def get_camera(
     camera_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_READ)),
 ) -> CameraOut:
+    if is_firestore():
+        return CameraOut.model_validate(await fs.get_camera_out(ctx, camera_id))
+    assert db is not None
     camera = await _get_camera(db, camera_id, ctx)
     return CameraOut.model_validate(camera_to_out(camera))
 
@@ -106,12 +119,16 @@ async def get_camera(
 @router.get("/{camera_id}/health", response_model=CameraHealthOut)
 async def get_camera_health(
     camera_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_READ)),
 ) -> CameraHealthOut:
-    camera = await _get_camera(db, camera_id, ctx)
-    out = camera_to_out(camera)
+    if is_firestore():
+        out = await fs.get_camera_out(ctx, camera_id)
+    else:
+        assert db is not None
+        camera = await _get_camera(db, camera_id, ctx)
+        out = camera_to_out(camera)
     return CameraHealthOut.model_validate(
         {
             "id": out["id"],
@@ -134,10 +151,25 @@ async def get_camera_health(
 async def create_camera(
     body: CameraCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_WRITE)),
 ) -> CameraOut:
+    if is_firestore():
+        out = await fs.create_camera(ctx, body)
+        await write_audit(
+            db,
+            action=AuditAction.CAMERA_CREATE,
+            user_id=ctx.user.id,
+            organization_id=out["organization_id"],
+            ip=client_ip(request),
+            target_type="camera",
+            target_id=out["id"],
+            extra={"name": out["name"]},
+        )
+        return CameraOut.model_validate(out)
+
+    assert db is not None
     site = await db.get(Site, body.site_id)
     gate = await db.get(Gate, body.gate_id)
     if not site or not gate:
@@ -190,10 +222,24 @@ async def update_camera(
     camera_id: str,
     body: CameraUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_WRITE)),
 ) -> CameraOut:
+    if is_firestore():
+        out = await fs.update_camera(ctx, camera_id, body)
+        await write_audit(
+            db,
+            action=AuditAction.CAMERA_UPDATE,
+            user_id=ctx.user.id,
+            organization_id=out["organization_id"],
+            ip=client_ip(request),
+            target_type="camera",
+            target_id=out["id"],
+        )
+        return CameraOut.model_validate(out)
+
+    assert db is not None
     camera = await _get_camera(db, camera_id, ctx)
     data = body.model_dump(exclude_unset=True)
     if "rtsp_url" in data:
@@ -225,10 +271,25 @@ async def update_camera(
 async def delete_camera(
     camera_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_WRITE)),
 ) -> Response:
+    if is_firestore():
+        camera = await fs.get_camera(ctx, camera_id)
+        await write_audit(
+            db,
+            action=AuditAction.CAMERA_DELETE,
+            user_id=ctx.user.id,
+            organization_id=camera.organization_id,
+            ip=client_ip(request),
+            target_type="camera",
+            target_id=camera.id,
+        )
+        await fs.delete_camera(ctx, camera_id)
+        return Response(status_code=204)
+
+    assert db is not None
     camera = await _get_camera(db, camera_id, ctx)
     await write_audit(
         db,
@@ -249,10 +310,24 @@ async def enable_camera(
     camera_id: str,
     body: EnableBody,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_WRITE)),
 ) -> CameraOut:
+    if is_firestore():
+        out = await fs.enable_camera(ctx, camera_id, body.enabled)
+        await write_audit(
+            db,
+            action=AuditAction.CAMERA_ENABLE if body.enabled else AuditAction.CAMERA_DISABLE,
+            user_id=ctx.user.id,
+            organization_id=out["organization_id"],
+            ip=client_ip(request),
+            target_type="camera",
+            target_id=out["id"],
+        )
+        return CameraOut.model_validate(out)
+
+    assert db is not None
     camera = await _get_camera(db, camera_id, ctx)
     camera.enabled = body.enabled
     await write_audit(
@@ -274,12 +349,34 @@ async def enable_camera(
 async def test_camera(
     body: CameraTestRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_TEST)),
 ) -> CameraTestResult:
     """Legacy test endpoint. Prefer POST /cameras/{id}/test-rtsp for stored cameras."""
     if body.camera_id:
+        if is_firestore():
+            from app.repositories import camera_repo
+
+            camera = await fs.get_camera(ctx, body.camera_id)
+            await write_audit(
+                db,
+                action=AuditAction.CAMERA_TEST,
+                user_id=ctx.user.id,
+                organization_id=camera.organization_id,
+                ip=client_ip(request),
+                target_type="camera",
+                target_id=camera.id,
+            )
+            result = test_rtsp_for_camera(camera)  # type: ignore[arg-type]
+            if hasattr(camera.status, "value"):
+                camera.status = str(camera.status.value)
+            else:
+                camera.status = str(camera.status)
+            await camera_repo().save(camera)
+            return CameraTestResult.model_validate(result)
+
+        assert db is not None
         camera = await _get_camera(db, body.camera_id, ctx)
         await write_audit(
             db,
@@ -302,10 +399,37 @@ async def test_camera(
 async def test_camera_rtsp(
     camera_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.CAMERA_TEST)),
 ) -> CameraTestResult:
+    if is_firestore():
+        from app.repositories import camera_repo
+
+        camera = await fs.get_camera(ctx, camera_id)
+        await write_audit(
+            db,
+            action=AuditAction.CAMERA_TEST,
+            user_id=ctx.user.id,
+            organization_id=camera.organization_id,
+            ip=client_ip(request),
+            target_type="camera",
+            target_id=camera.id,
+        )
+        result = test_rtsp_for_camera(camera)  # type: ignore[arg-type]
+        if hasattr(camera.status, "value"):
+            camera.status = str(camera.status.value)
+        else:
+            camera.status = str(camera.status)
+        await camera_repo().save(camera)
+        await hub.publish(
+            camera.organization_id,
+            "camera.status",
+            {"id": camera.id, "status": camera.status, "connection_error": camera.connection_error},
+        )
+        return CameraTestResult.model_validate(result)
+
+    assert db is not None
     camera = await _get_camera(db, camera_id, ctx)
     await write_audit(
         db,

@@ -8,8 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError, ValidationAppError
+from app.core.runtime import is_firestore
 from app.core.security import hash_password, verify_password
 from app.domain.connectivity import GatewayRecord
+from app.domain.records import SiteRecord
 from app.models.camera import Camera
 from app.models.edge_agent import EdgeAgent
 from app.models.enums import (
@@ -20,7 +22,14 @@ from app.models.enums import (
 )
 from app.models.nvr import Nvr
 from app.models.site import Site
-from app.repositories import gateway_repo, site_connectivity_repo
+from app.repositories import (
+    camera_repo,
+    edge_agent_repo,
+    gateway_repo,
+    nvr_repo,
+    site_connectivity_repo,
+    site_repo,
+)
 from app.schemas.connectivity import SiteConnectivityOut, SiteConnectivityUpdate
 from app.schemas.gateway import GatewayCreated, GatewayHeartbeatRequest, GatewayOut, GatewayUpdate
 from app.services.tenant import TenantContext
@@ -57,18 +66,42 @@ def public_gateway(record: GatewayRecord, *, camera_count: int = 0, nvr_count: i
     return out
 
 
-async def _counts(db: AsyncSession, gateway_id: str) -> tuple[int, int]:
+async def _counts(db: AsyncSession | None, gateway_id: str) -> tuple[int, int]:
+    if is_firestore() or db is None:
+        gw = await gateway_repo(db).get(gateway_id)
+        if not gw:
+            return 0, 0
+        cameras = await camera_repo(db).list_for_tenant(
+            organization_id=gw.organization_id, site_ids=None, site_id=gw.site_id
+        )
+        nvrs = await nvr_repo(db).list_for_tenant(
+            organization_id=gw.organization_id, site_ids=None, site_id=gw.site_id
+        )
+        return (
+            sum(1 for c in cameras if c.gateway_id == gateway_id),
+            sum(1 for n in nvrs if n.gateway_id == gateway_id),
+        )
     cameras = int((await db.execute(select(func.count(Camera.id)).where(Camera.gateway_id == gateway_id))).scalar_one())
     nvrs = int((await db.execute(select(func.count(Nvr.id)).where(Nvr.gateway_id == gateway_id))).scalar_one())
     return cameras, nvrs
 
 
-async def _site_name(db: AsyncSession, site_id: str) -> str | None:
+async def _site_name(db: AsyncSession | None, site_id: str) -> str | None:
+    if is_firestore() or db is None:
+        site = await site_repo(db).get(site_id)
+        return site.name if site else None
     site = await db.get(Site, site_id)
     return site.name if site else None
 
 
-async def load_site_for_ctx(db: AsyncSession, ctx: TenantContext, site_id: str) -> Site:
+async def load_site_for_ctx(db: AsyncSession | None, ctx: TenantContext, site_id: str) -> Site | SiteRecord:
+    if is_firestore() or db is None:
+        site = await site_repo(db).get(site_id)
+        if not site:
+            raise NotFoundError("Site not found")
+        ctx.ensure_org(site.organization_id)
+        ctx.ensure_site(site.id)
+        return site
     site = await db.get(Site, site_id)
     if not site:
         raise NotFoundError("Site not found")
@@ -78,7 +111,7 @@ async def load_site_for_ctx(db: AsyncSession, ctx: TenantContext, site_id: str) 
 
 
 async def create_gateway(
-    db: AsyncSession,
+    db: AsyncSession | None,
     ctx: TenantContext,
     *,
     site_id: str,
@@ -116,7 +149,7 @@ async def create_gateway(
     return out, device_key
 
 
-async def get_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) -> GatewayOut:
+async def get_gateway(db: AsyncSession | None, ctx: TenantContext, gateway_id: str) -> GatewayOut:
     record = await gateway_repo(db).get(gateway_id)
     if record is None:
         raise NotFoundError("Gateway not found")
@@ -126,7 +159,7 @@ async def get_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) -> 
     return public_gateway(record, camera_count=cameras, nvr_count=nvrs, site_name=await _site_name(db, record.site_id))
 
 
-async def list_gateways(db: AsyncSession, ctx: TenantContext, site_id: str | None = None) -> list[GatewayOut]:
+async def list_gateways(db: AsyncSession | None, ctx: TenantContext, site_id: str | None = None) -> list[GatewayOut]:
     if site_id:
         await load_site_for_ctx(db, ctx, site_id)
     org_id = None if ctx.is_super else ctx.organization_id
@@ -146,7 +179,7 @@ async def list_gateways(db: AsyncSession, ctx: TenantContext, site_id: str | Non
     return out
 
 
-async def update_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str, body: GatewayUpdate) -> GatewayOut:
+async def update_gateway(db: AsyncSession | None, ctx: TenantContext, gateway_id: str, body: GatewayUpdate) -> GatewayOut:
     record = await gateway_repo(db).get(gateway_id)
     if record is None:
         raise NotFoundError("Gateway not found")
@@ -165,7 +198,7 @@ async def update_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str, 
     return public_gateway(saved, camera_count=cameras, nvr_count=nvrs, site_name=await _site_name(db, saved.site_id))
 
 
-async def decommission_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) -> None:
+async def decommission_gateway(db: AsyncSession | None, ctx: TenantContext, gateway_id: str) -> None:
     record = await gateway_repo(db).get(gateway_id)
     if record is None:
         raise NotFoundError("Gateway not found")
@@ -184,7 +217,7 @@ async def decommission_gateway(db: AsyncSession, ctx: TenantContext, gateway_id:
         await site_connectivity_repo(db).save(site_conn)
 
 
-async def provision_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) -> tuple[GatewayOut, str]:
+async def provision_gateway(db: AsyncSession | None, ctx: TenantContext, gateway_id: str) -> tuple[GatewayOut, str]:
     record = await gateway_repo(db).get(gateway_id)
     if record is None:
         raise NotFoundError("Gateway not found")
@@ -204,7 +237,7 @@ async def provision_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: st
     return out, device_key
 
 
-async def revoke_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) -> GatewayOut:
+async def revoke_gateway(db: AsyncSession | None, ctx: TenantContext, gateway_id: str) -> GatewayOut:
     record = await gateway_repo(db).get(gateway_id)
     if record is None:
         raise NotFoundError("Gateway not found")
@@ -221,7 +254,7 @@ async def revoke_gateway(db: AsyncSession, ctx: TenantContext, gateway_id: str) 
     return public_gateway(saved, camera_count=cameras, nvr_count=nvrs, site_name=await _site_name(db, saved.site_id))
 
 
-async def authenticate_gateway(db: AsyncSession, gateway_id: str, device_key: str) -> GatewayRecord:
+async def authenticate_gateway(db: AsyncSession | None, gateway_id: str, device_key: str) -> GatewayRecord:
     record = await gateway_repo(db).get(gateway_id)
     if (
         record is None
@@ -234,7 +267,7 @@ async def authenticate_gateway(db: AsyncSession, gateway_id: str, device_key: st
     return record
 
 
-async def apply_heartbeat(db: AsyncSession, record: GatewayRecord, body: GatewayHeartbeatRequest) -> GatewayOut:
+async def apply_heartbeat(db: AsyncSession | None, record: GatewayRecord, body: GatewayHeartbeatRequest) -> GatewayOut:
     now = datetime.now(UTC)
     record.last_seen = now
     if body.vpn_status is not None:
@@ -262,24 +295,45 @@ async def apply_heartbeat(db: AsyncSession, record: GatewayRecord, body: Gateway
     return public_gateway(saved, camera_count=cameras, nvr_count=nvrs, site_name=await _site_name(db, saved.site_id))
 
 
-async def site_connectivity(db: AsyncSession, ctx: TenantContext, site_id: str) -> SiteConnectivityOut:
+async def site_connectivity(db: AsyncSession | None, ctx: TenantContext, site_id: str) -> SiteConnectivityOut:
     site = await load_site_for_ctx(db, ctx, site_id)
     gateway_out = None
-    if site.primary_gateway_id:
-        gw = await gateway_repo(db).get(site.primary_gateway_id)
+    primary_gateway_id = getattr(site, "primary_gateway_id", None)
+    if primary_gateway_id:
+        gw = await gateway_repo(db).get(primary_gateway_id)
         if gw and gw.site_id == site.id:
             cameras, nvrs = await _counts(db, gw.id)
             gateway_out = public_gateway(gw, camera_count=cameras, nvr_count=nvrs, site_name=site.name)
-    camera_count = int((await db.execute(select(func.count(Camera.id)).where(Camera.site_id == site.id))).scalar_one())
-    nvr_count = int((await db.execute(select(func.count(Nvr.id)).where(Nvr.site_id == site.id))).scalar_one())
-    edge_count = int((await db.execute(select(func.count(EdgeAgent.id)).where(EdgeAgent.site_id == site.id))).scalar_one())
+
+    if is_firestore() or db is None:
+        cams = await camera_repo(db).list_for_tenant(
+            organization_id=site.organization_id, site_ids=None, site_id=site.id
+        )
+        nvrs_list = await nvr_repo(db).list_for_tenant(
+            organization_id=site.organization_id, site_ids=None, site_id=site.id
+        )
+        edges = await edge_agent_repo(db).list_for_tenant(
+            organization_id=site.organization_id, site_ids=None, site_id=site.id
+        )
+        camera_count = len(cams)
+        nvr_count = len(nvrs_list)
+        edge_count = len(edges)
+        connectivity_mode = getattr(site, "connectivity_mode", "EXISTING_VPN_ROUTER")
+        anpr_deployment_mode = getattr(site, "anpr_deployment_mode", "LOCAL_EDGE_AGENT")
+    else:
+        camera_count = int((await db.execute(select(func.count(Camera.id)).where(Camera.site_id == site.id))).scalar_one())
+        nvr_count = int((await db.execute(select(func.count(Nvr.id)).where(Nvr.site_id == site.id))).scalar_one())
+        edge_count = int((await db.execute(select(func.count(EdgeAgent.id)).where(EdgeAgent.site_id == site.id))).scalar_one())
+        connectivity_mode = site.connectivity_mode
+        anpr_deployment_mode = site.anpr_deployment_mode
+
     return SiteConnectivityOut(
         site_id=site.id,
         organization_id=site.organization_id,
         site_name=site.name,
-        connectivity_mode=site.connectivity_mode,
-        anpr_deployment_mode=site.anpr_deployment_mode,
-        primary_gateway_id=site.primary_gateway_id,
+        connectivity_mode=connectivity_mode,
+        anpr_deployment_mode=anpr_deployment_mode,
+        primary_gateway_id=primary_gateway_id,
         gateway=gateway_out,
         camera_count=camera_count,
         nvr_count=nvr_count,
@@ -288,7 +342,7 @@ async def site_connectivity(db: AsyncSession, ctx: TenantContext, site_id: str) 
 
 
 async def update_site_connectivity(
-    db: AsyncSession,
+    db: AsyncSession | None,
     ctx: TenantContext,
     site_id: str,
     body: SiteConnectivityUpdate,

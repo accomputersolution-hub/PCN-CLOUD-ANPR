@@ -4,12 +4,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit_log import AuditLog
+from app.core.logging import get_logger
 from app.models.enums import AuditAction
+
+logger = get_logger(__name__)
 
 
 async def write_audit(
-    db: AsyncSession,
+    db: AsyncSession | None,
     *,
     action: AuditAction | str,
     user_id: str | None,
@@ -19,6 +21,21 @@ async def write_audit(
     target_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
+    """Persist audit row when SQLAlchemy session is present; otherwise structured log only."""
+    if db is None:
+        logger.info(
+            "audit",
+            action=str(action),
+            user_id=user_id,
+            organization_id=organization_id,
+            ip=ip,
+            target_type=target_type,
+            target_id=target_id,
+            extra=extra or {},
+        )
+        return
+    from app.models.audit_log import AuditLog
+
     db.add(
         AuditLog(
             user_id=user_id,

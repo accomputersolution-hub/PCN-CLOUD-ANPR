@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Storage paths: {organizationId}/events/{eventId}/{snapshot|plate_crop|vehicle_crop}.jpg
+// Client uploads are denied. Backend Admin SDK performs writes.
+// Client reads require Auth + matching organization profile.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function sameOrg(orgId) {
+      return signedIn()
+        && userDoc().organization_id == orgId
+        && userDoc().is_active == true;
+    }
+
+    function isSuperAdmin() {
+      return signedIn() && userDoc().role == 'SUPER_ADMIN';
+    }
+
+    match /{organizationId}/events/{eventId}/{fileName} {
+      allow read: if isSuperAdmin() || sameOrg(organizationId);
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

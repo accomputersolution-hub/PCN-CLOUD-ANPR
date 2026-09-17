@@ -8,46 +8,43 @@ Multi-tenant Automatic Number Plate Recognition platform for hotels, resorts, ho
 The browser is an operations PWA (manage, search, report, configure). Continuous CCTV ANPR does **not** run in the browser.
 
 ```
-CCTV/NVR → RTSP/ONVIF → Edge Agent → ANPR Engine → Backend API → PostgreSQL → Web/PWA
+CCTV/NVR → RTSP/ONVIF → Edge Agent → ANPR Engine → Backend API → Firebase (Auth + Firestore + Storage) → Web/PWA
 ```
+
+**Firebase-first runtime (project `pcn-anpr`):**
+
+| Concern | Default |
+| --- | --- |
+| Auth | `AUTH_PROVIDER=firebase` |
+| Datastore | `DATASTORE_PROVIDER=firestore` |
+| Storage | `STORAGE_PROVIDER=firebase` |
+
+PostgreSQL is **not** required for normal development or production. Legacy SQLAlchemy remains available only for tests via explicit `DATASTORE_PROVIDER=sqlalchemy`.
 
 If the site internet drops, the edge agent keeps capturing into a local SQLite queue and syncs when the link returns.
 
-NVR reachability uses a **private VPN path**, not public RTSP port 554:
+See [CONNECTIVITY.md](CONNECTIVITY.md), [GATEWAY.md](GATEWAY.md), [SETUP.md](SETUP.md), [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
 
-- Mode 1: existing VPN router (MikroTik or other) enrolled as a gateway
-- Mode 2: PCN Cloud Gateway CPE when the current router cannot VPN
-
-See [CONNECTIVITY.md](CONNECTIVITY.md), [GATEWAY.md](GATEWAY.md), [DEPLOYMENT.md](DEPLOYMENT.md).
-
-Firebase is **prepared but not switched** (`AUTH_PROVIDER=jwt`, PostgreSQL, local storage). See [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
-
-## Milestone 1 (this repository)
-
-Working path:
+## Milestone 1
 
 **LOGIN → DASHBOARD → CAMERA MANAGEMENT → EVENTS → VEHICLE SEARCH → responsive PWA**
 
-Mock ANPR events are fully wired so the product can be demonstrated before live cameras and model inference.
-
-## Quick start (development)
+## Quick start (development — no PostgreSQL)
 
 ```bash
 # 1. Environment
 cp .env.example .env
+# Set FIREBASE_CREDENTIALS_FILE to your Admin SDK JSON (never commit it)
+# Confirm FIREBASE_PROJECT_ID=pcn-anpr and FIREBASE_* web keys
 
-# 2. Database
-docker compose up -d postgres
-
-# 3. Backend (from backend/)
+# 2. Backend (from backend/)
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
-alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 4. Frontend (from frontend/)
+# 3. Frontend (from frontend/)
 npm install
 npm run dev
 ```
@@ -56,58 +53,19 @@ npm run dev
 - API: http://localhost:8000/api/v1
 - OpenAPI: http://localhost:8000/api/v1/docs
 
-All-in-one:
-
-```bash
-docker compose up -d --build
-```
-
-Then open http://localhost:8080
-
-## Demo accounts
-
-Password for all seeded users: `ChangeMe@12345`
-
-| Email | Role |
-| --- | --- |
-| admin@pcncloud.in | Super Admin |
-| orgadmin@pcncloud.in | Organization Admin (Hotel A) |
-| manager@pcncloud.in | Site Manager (Lonavala) |
-| guard@pcncloud.in | Security Guard |
-| viewer@pcncloud.in | Viewer |
-| societyadmin@pcncloud.in | Organization Admin (Society B) |
-
-## Tests
-
-```bash
-# Backend
-cd backend
-pytest
-
-# Frontend
-cd frontend
-npm test
-
-# ANPR engine
-cd anpr-engine
-pytest
-
-# Edge agent
-cd edge-agent
-pytest
-```
+Create a Firebase Auth user, then a matching Firestore `users/{uid}` profile document (role, organization_id, site_ids). See [SETUP.md](SETUP.md).
 
 ## Docs
 
-- [SETUP.md](SETUP.md) — exact commands
-- [ARCHITECTURE.md](ARCHITECTURE.md) — choices and tenant model
-- [API.md](API.md) — versioned REST + WebSocket
-- [EDGE_AGENT.md](EDGE_AGENT.md) — site agent, queue, sync
-- [ANPR_PIPELINE.md](ANPR_PIPELINE.md) — replaceable detectors/OCR
-- [CONNECTIVITY.md](CONNECTIVITY.md) — VPN modes and NVR path
-- [GATEWAY.md](GATEWAY.md) — gateway vs edge agent
-- [DEPLOYMENT.md](DEPLOYMENT.md) — customer examples A/B
+| Doc | Contents |
+| --- | --- |
+| [SETUP.md](SETUP.md) | Local Firebase-first setup |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design |
+| [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md) | Firebase ops & collections |
+| [API.md](API.md) | HTTP API |
+| [EDGE_AGENT.md](EDGE_AGENT.md) | Site agent |
+| [CONNECTIVITY.md](CONNECTIVITY.md) | VPN / gateway modes |
 
-## License note
+## License
 
-Default ANPR providers are in-process mocks (no copyleft model weights). PaddleOCR (Apache 2.0) can be plugged in later. Do not add a GPL detector as the default engine without a legal review.
+Proprietary — PCN Cloud.

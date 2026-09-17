@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     seed_demo_data: bool = True
 
-    database_url: str = "postgresql+asyncpg://pcn:pcn@localhost:5432/pcn_cloud"
+    # Empty by default — not required when DATASTORE_PROVIDER=firestore.
+    # Legacy SQLAlchemy path only: set DATABASE_URL when DATASTORE_PROVIDER=sqlalchemy.
+    database_url: str = ""
 
     jwt_secret: str = "change-me-dev-jwt-secret-not-for-production"
     jwt_algorithm: str = "HS256"
@@ -32,16 +34,16 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://localhost:4173,http://localhost:8080"
 
-    storage_provider: str = "local"
+    storage_provider: str = "firebase"
     storage_path: str = "./data/storage"
 
     redis_url: str | None = None
 
-    # Auth: jwt (current PostgreSQL users + JWT). firebase is prepared, not enabled.
-    auth_provider: str = "jwt"
+    # Auth: firebase (default). jwt = legacy PostgreSQL users + JWT.
+    auth_provider: str = "firebase"
 
-    # Persistence: sqlalchemy|postgres (current). firestore prepared, not enabled.
-    datastore_provider: str = "sqlalchemy"
+    # Persistence: firestore (default). sqlalchemy|postgres = legacy SQL path.
+    datastore_provider: str = "firestore"
 
     # Firebase (server). Never commit real service-account JSON.
     firebase_project_id: str = ""
@@ -50,7 +52,7 @@ class Settings(BaseSettings):
     # Optional inline JSON for CI only; prefer FIREBASE_CREDENTIALS_FILE locally.
     firebase_credentials_json: str = ""
 
-    # Firebase web client config (for a future SPA SDK). Safe to expose project public keys;
+    # Firebase web client config (for SPA SDK). Safe to expose project public keys;
     # still do not put Admin credentials here.
     firebase_api_key: str = ""
     firebase_auth_domain: str = ""
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
 
     @property
     def is_sqlite(self) -> bool:
+        if not (self.database_url or "").strip():
+            return False
         return self.database_url.startswith("sqlite")
 
     @property

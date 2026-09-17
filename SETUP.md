@@ -1,72 +1,56 @@
-# Setup
+# Setup (Firebase-first)
+
+Normal development and production **do not require PostgreSQL or Docker**.
 
 ## Prerequisites
 
 - Python 3.12+
 - Node.js 20+
-- Docker (for PostgreSQL; optional Redis)
-- Git
+- Firebase project access (`pcn-anpr`)
+- Firebase Admin SDK service-account JSON (local path only — never commit)
 
-## 1. Clone and configure
+## 1. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Generate production secrets before any real deployment:
+Required for backend Admin SDK:
+
+```
+AUTH_PROVIDER=firebase
+DATASTORE_PROVIDER=firestore
+STORAGE_PROVIDER=firebase
+FIREBASE_PROJECT_ID=pcn-anpr
+FIREBASE_STORAGE_BUCKET=pcn-anpr.firebasestorage.app
+FIREBASE_CREDENTIALS_FILE=C:\path\to\serviceAccount.json
+FIREBASE_API_KEY=...
+FIREBASE_AUTH_DOMAIN=pcn-anpr.firebaseapp.com
+FIREBASE_APP_ID=...
+JWT_SECRET=<long random string>
+CREDENTIALS_ENCRYPTION_KEY=<fernet key>
+```
+
+Generate secrets:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Set `CREDENTIALS_ENCRYPTION_KEY` and a long random `JWT_SECRET`. Never commit `.env`.
+`DATABASE_URL` is unused when `DATASTORE_PROVIDER=firestore`.
 
-### Providers (defaults — keep for local)
-
-```
-AUTH_PROVIDER=jwt
-DATASTORE_PROVIDER=sqlalchemy
-STORAGE_PROVIDER=local
-```
-
-Firebase variables (`FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_CREDENTIALS_FILE`, web client keys) may be left empty for local mode.
-
-**Phase 2 — optional Firebase Storage only** (events still PostgreSQL):
-
-```bash
-cd backend
-pip install -r requirements-firebase.txt
-```
-
-Then set `STORAGE_PROVIDER=firebase` plus project id, bucket, and credentials file. Keep `AUTH_PROVIDER=jwt` and `DATASTORE_PROVIDER=sqlalchemy`. See [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
-
-Setting `AUTH_PROVIDER=firebase` or `DATASTORE_PROVIDER=firestore` without a complete wiring still fails clearly — it does not return mock data.
-
-## 2. Start PostgreSQL
-
-```bash
-docker compose up -d postgres
-```
-
-Connection used by the backend:
-
-```
-postgresql+asyncpg://pcn:pcn@localhost:5432/pcn_cloud
-```
-
-## 3. Backend
+## 2. Backend
 
 ```bash
 cd backend
 python -m venv .venv
 ```
 
-Windows PowerShell:
+Windows:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -75,29 +59,33 @@ macOS / Linux:
 ```bash
 source .venv/bin/activate
 pip install -r requirements-dev.txt
-alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-On first start with `SEED_DEMO_DATA=true`, demo organizations, cameras and mock events are created.
+Startup fails clearly if Firebase Admin credentials are missing (no silent fallback to PostgreSQL).
 
-### Migration command
+## 3. Bootstrap first operator (once)
 
-```bash
-cd backend
-alembic upgrade head
+1. Create a user in Firebase Console → Authentication (email/password).
+2. Copy the user's **UID**.
+3. Create Firestore document `users/{uid}`:
+
+```json
+{
+  "email": "admin@example.com",
+  "full_name": "Platform Admin",
+  "role": "SUPER_ADMIN",
+  "organization_id": null,
+  "is_active": true,
+  "site_ids": [],
+  "auth_provider": "firebase",
+  "firebase_uid": "<same-uid>"
+}
 ```
 
-Connectivity / gateway tables are in revision `0004_connectivity_gateways`.
+4. Log in via `POST /api/v1/auth/login` with that email/password (Identity Toolkit + Firestore profile → API JWT).
 
-Create a new revision (after model changes):
-
-```bash
-alembic revision --autogenerate -m "describe change"
-alembic upgrade head
-```
-
-## 4. Frontend PWA
+## 4. Frontend
 
 ```bash
 cd frontend
@@ -105,127 +93,45 @@ npm install
 npm run dev
 ```
 
-Development URL: **http://localhost:5173**
+Open http://localhost:5173
 
-Vite proxies `/api` to `http://localhost:8000`.
-
-Production build:
+## 5. Deploy rules / indexes (when changed)
 
 ```bash
-cd frontend
-npm run build
-npm run preview
+npx -y firebase-tools@latest --project pcn-anpr deploy --only firestore:rules,firestore:indexes,storage
 ```
 
-## 5. Full Docker stack
+## 6. Edge agent (optional)
+
+See [EDGE_AGENT.md](EDGE_AGENT.md). Edge uses API keys (`X-Edge-Id` / `X-Edge-Key`); ANPR/RTSP pipelines are unchanged.
+
+## Tests
 
 ```bash
-docker compose up -d --build
-```
-
-- UI: http://localhost:8080
-- API: http://localhost:8000/api/v1/docs
-
-Optional Redis:
-
-```bash
-docker compose --profile full up -d
-```
-
-V1 rate limits use in-memory storage if `REDIS_URL` is empty.
-
-## 6. Tests
-
-```bash
+# Backend (forces legacy sqlalchemy for most fixtures via conftest)
 cd backend
 pytest
-```
 
-```bash
-cd frontend
-npm test
-```
-
-```bash
-cd anpr-engine
-pip install -e .
-pytest
-```
-
-```bash
+# Edge agent
 cd edge-agent
-pip install -r requirements.txt
-pytest
-```
-
-## 7. Edge agent
-
-### Mock ANPR (no camera)
-
-```bash
-cd edge-agent
-pip install -r requirements.txt
 set PYTHONPATH=..\anpr-engine;%PYTHONPATH%
-set EDGE_MOCK_MODE=true
-set EDGE_MOCK_ONESHOT=true
-python -m pcn_edge.main
+pytest
+
+# Frontend
+cd frontend
+npm test -- --run
+npm run build
 ```
 
-### Live RTSP (Phase 5)
+## Legacy SQLAlchemy path (optional)
 
-1. Install **FFmpeg** and ensure `ffmpeg` is on PATH.
-2. Register an edge agent (`POST /api/v1/edge/register`) and put `EDGE_AGENT_ID` / `EDGE_AGENT_KEY` in `.env`.
-3. Add a camera with RTSP URL (+ username/password) in the Cameras UI. Credentials are encrypted; the UI never shows them again.
-4. Click **Test RTSP**, then **Start**.
-5. Run the agent:
-
-```bash
-set EDGE_MOCK_MODE=false
-set EDGE_RTSP_ENABLED=true
-set EDGE_FRAME_INTERVAL=0.5
-set EDGE_FRAME_SAVE_DIR=./data/edge-frames
-set DEBUG_SAVE_ALL_FRAMES=false
-python -m pcn_edge.main
-```
-
-Detection snapshots (vehicle/plate/OCR hits) appear under `EDGE_FRAME_SAVE_DIR`. Camera health (status, FPS, last frame, errors) updates via heartbeat.
-
-**Live ANPR events (Phase 6B):** set `ANPR_LIVE_ENABLED=true` (with `EDGE_MOCK_MODE=false`). Sampled frames go to a bounded inference worker; plates are confirmed over multiple observations, then one ENTRY/EXIT event is enqueued (cooldown suppresses duplicates). Use Mock ANPR when you do not want live camera events.
-
-### First CP Plus / Dahua / Hikvision NVR
-
-| Brand | Typical RTSP pattern |
-| --- | --- |
-| Hikvision | `rtsp://<nvr-ip>:554/Streaming/Channels/<channel>01` (101 = ch1 main) |
-| Dahua / CP Plus | `rtsp://<nvr-ip>:554/cam/realmonitor?channel=1&subtype=0` |
-
-Enter host URL without password in **RTSP URL**, and put username/password in the separate fields. Prefer a LAN IP reachable from the PC running the edge agent.
-
-## 8. ANPR image inference (Phase 6A)
-
-Does **not** create live ENTRY/EXIT events. Processes saved JPEGs only.
-
-```powershell
-cd anpr-engine
-..\backend\.venv\Scripts\pip.exe install -r requirements.txt
-# Optional real OCR (Apache 2.0):
-..\backend\.venv\Scripts\pip.exe install -r requirements-ocr.txt
-
-$env:PYTHONPATH = "$PWD"
-python -m anpr_engine.cli --image "..\edge-agent\data\edge-frames\<your-frame>.jpg"
-python -m anpr_engine.cli --folder "..\edge-agent\data\edge-frames"
-```
-
-Outputs: console report, `output/results.json`, `output/annotated_*.jpg`.
-
-Dev API (authenticated): `POST /api/v1/anpr/test-image` with multipart file upload.
-
-## 9. SQLite fallback (no Docker)
-
-For quick API experiments only:
+Only for historical tests or emergency rollback:
 
 ```
-DATABASE_URL=sqlite+aiosqlite:///./data/pcn.db
+AUTH_PROVIDER=jwt
+DATASTORE_PROVIDER=sqlalchemy
+STORAGE_PROVIDER=local
+DATABASE_URL=postgresql+asyncpg://pcn:pcn@localhost:5432/pcn_cloud
 ```
 
-PostgreSQL remains the supported production database.
+This is **not** the supported product runtime.

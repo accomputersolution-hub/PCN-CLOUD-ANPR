@@ -1,0 +1,87 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "anprEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "anprEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vehicles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "plate_normalized", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cameras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gateways",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "nvrs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "edgeAgents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vehicleVisits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "entry_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vehicleVisits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organization_id", "order": "ASCENDING" },
+        { "fieldPath": "site_id", "order": "ASCENDING" },
+        { "fieldPath": "entry_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

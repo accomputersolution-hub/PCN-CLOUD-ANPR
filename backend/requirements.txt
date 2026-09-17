@@ -1,5 +1,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+firebase-admin>=6.5.0,<8
+# legacy/optional: SQLAlchemy path for DATASTORE_PROVIDER=sqlalchemy tests
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 aiosqlite==0.20.0

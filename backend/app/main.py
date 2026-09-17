@@ -14,6 +14,8 @@ from app.api.v1 import api_router
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
+from app.core.providers import current_providers
+from app.core.runtime import is_firestore, require_firebase_stack
 from app.db.seed import ensure_demo_users, seed_if_empty
 from app.db.session import get_session_factory, init_models
 
@@ -25,12 +27,30 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await init_models()
-    if settings.seed_demo_data:
-        async with get_session_factory()() as session:
-            await seed_if_empty(session)
-            await ensure_demo_users(session)
-    logger.info("startup", env=settings.environment)
+    providers = current_providers(settings)
+    if providers.auth == "firebase" or providers.datastore == "firestore" or providers.storage == "firebase":
+        require_firebase_stack()
+
+    if is_firestore():
+        from app.firebase.admin import get_firebase_admin_app
+
+        get_firebase_admin_app()
+        logger.info(
+            "startup_firestore",
+            env=settings.environment,
+            providers={"auth": providers.auth, "datastore": providers.datastore, "storage": providers.storage},
+        )
+    else:
+        await init_models()
+        if settings.seed_demo_data:
+            async with get_session_factory()() as session:
+                await seed_if_empty(session)
+                await ensure_demo_users(session)
+        logger.info(
+            "startup",
+            env=settings.environment,
+            providers={"auth": providers.auth, "datastore": providers.datastore, "storage": providers.storage},
+        )
     yield
     logger.info("shutdown")
 

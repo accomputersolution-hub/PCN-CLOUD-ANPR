@@ -15,7 +15,7 @@ CCTV / NVR
       → confirmed snapshots only
       → SQLite outbox
   → Backend API (when online)
-  → PostgreSQL (Firestore adapter planned behind repositories)
+  → Firebase (Auth + Firestore + Storage) — source of truth
   → Web / PWA (management, search, reports)
 ```
 
@@ -26,22 +26,18 @@ Offline: events stay in SQLite. When the WAN returns, `/api/v1/edge/sync` upload
 | Topic | Choice | Why |
 | --- | --- | --- |
 | API | FastAPI + Pydantic v2, `/api/v1` | OpenAPI for free, typed contracts |
-| DB | PostgreSQL 16 + SQLAlchemy 2 async | Production default; SQLite only for tests/dev fallback |
-| Auth | Access JWT (15 min) + rotating refresh tokens hashed at rest | Simple, works for PWA; httpOnly cookies are a later hardening step |
-| Passwords | bcrypt | No plaintext |
-| Camera secrets | Fernet at rest; omitted from API responses | Operators never see stored RTSP passwords |
-| Tenant isolation | `organization_id` on tenant tables + query filters in `TenantContext` | Enforced in the API, not only the UI |
+| Datastore | Cloud Firestore (`DATASTORE_PROVIDER=firestore`) | Firebase-first; no PostgreSQL required at runtime |
+| Auth | Firebase Authentication + Firestore user profiles + API JWT | PWA keeps Bearer tokens; passwords stay in Firebase Auth |
+| Camera secrets | Fernet at rest on camera docs (Admin only); omitted from API responses | Operators never see stored RTSP passwords |
+| Tenant isolation | `organization_id` + `site_ids` on profiles; `TenantContext` | Enforced in the API and Firestore rules |
 | RBAC | Permission sets per role in `app/core/rbac.py` | Backend 403s even if a route is visible |
-| Realtime | FastAPI WebSocket hub scoped by org (super admin sees all) | Dashboard without polling |
-| Storage | `StorageBackend` + local filesystem | Phase 2: `STORAGE_PROVIDER=firebase` uses Admin SDK for evidence blobs; default remains local |
-| Datastore | SQLAlchemy today (`DATASTORE_PROVIDER=sqlalchemy`) | Gateway/NVR/site connectivity + domain records go through `app/repositories` so Firestore can replace PG without rewriting ANPR |
-| Auth providers | `AUTH_PROVIDER=jwt` (live) | `AuthProvider` abstraction; Firebase Auth adapter refuses unconfigured / unwired use |
-| ANPR models | Interfaces `VehicleDetector`, `PlateDetector`, `OCRProvider` + mock providers | No GPL default; PaddleOCR (Apache 2.0) can replace OCR later |
-| Dedup / visits | Site JSON settings: min confidence, duplicate window, cooldown | Configurable without a new table |
+| Realtime | FastAPI WebSocket hub scoped by org | Dashboard without Firestore polling |
+| Storage | Firebase Storage (`STORAGE_PROVIDER=firebase`) | Evidence blobs; no public URLs by default |
+| Legacy SQL | `DATASTORE_PROVIDER=sqlalchemy` | Tests / emergency only — not product runtime |
+| ANPR models | Interfaces + mock providers | No GPL default; PaddleOCR can replace OCR later |
+| Dedup / visits | Site JSON settings | Configurable without schema migrations |
 | Timezones | Per-site IANA TZ, default `Asia/Kolkata` | Events store UTC + local timestamp |
-| Rate limit | slowapi in-memory; Redis optional | Avoid a hard Redis dependency in V1 |
-| PWA | vite-plugin-pwa, network-only for `/api` | Installable shell; ANPR is not claimed in the browser |
-| Frontend tokens | memory + localStorage | Required for PWA restore; trade-off vs httpOnly cookies documented here |
+| PWA | vite-plugin-pwa, network-only for `/api` | Installable shell; ANPR is not in the browser |
 
 ## Tenancy
 
@@ -102,43 +98,31 @@ CCTV / NVR → RTSP → Edge Agent (FFmpeg) → JPEG frames
 
 The Edge Agent is unchanged: RTSP, FFmpeg, PaddleOCR, temporal confirmation, cooldown. Gateways only describe **how the cloud reaches the NVR LAN**. See CONNECTIVITY.md and GATEWAY.md.
 
-## Firebase / cloud migration (Phase 1 — prepared, not switched)
-
-Default providers (keep these for local/dev):
+## Firebase / cloud migration (pcn-anpr provisioned; app defaults unchanged)
 
 | Concern | Env | Default |
 | --- | --- | --- |
-| Auth | `AUTH_PROVIDER` | `jwt` |
-| Datastore | `DATASTORE_PROVIDER` | `sqlalchemy` (alias: `postgres`) |
-| Storage | `STORAGE_PROVIDER` | `local` |
+| Auth | `AUTH_PROVIDER` | `jwt` (optional `firebase`) |
+| Datastore | `DATASTORE_PROVIDER` | `sqlalchemy` (optional `firestore`) |
+| Storage | `STORAGE_PROVIDER` | `local` (optional `firebase`) |
 
-Abstractions:
+Cloud project **`pcn-anpr`**: Firestore `(default)` in **`asia-south1`**, email/password Auth, Web app created, tenant rules deployed. Storage default bucket still needs Console **Get Started** once. Details: [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md).
 
 ```
 AuthProvider
-  ├── JwtAuthProvider          (live)
-  └── FirebaseAuthProvider     (config-checked; not enabled)
+  ├── JwtAuthProvider          (default)
+  └── FirebaseAuthProvider     (Identity Toolkit + Admin verify + PG RBAC profile)
 
 Datastore
-  ├── SQLAlchemy repositories  (live)
-  └── Firestore repositories   (structure only; raises until wired)
+  ├── SQLAlchemy repositories  (default)
+  └── Firestore repositories   (Admin SDK; metadata only)
 
 StorageBackend
-  ├── LocalFilesystemStorage   (default / live)
-  └── FirebaseStorage          (Phase 2 Admin SDK — set STORAGE_PROVIDER=firebase)
+  ├── LocalFilesystemStorage   (default)
+  └── FirebaseStorage          (Admin SDK evidence blobs)
 ```
 
-- Domain records: `app/domain/connectivity.py`, `app/domain/records.py`
-- Provider helpers: `app/core/providers.py`, `app/auth/`, `app/firebase/`
-- Cost controls: pagination caps, heartbeat throttle helpers (`app/firebase/cost_controls.py`)
-- Example rules: `firestore.rules.example`, `storage.rules.example` (not production-verified)
-- Migration plan: [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md)
-
-Phase 2: confirmed ANPR snapshots/crops can land in Firebase Storage while **event rows stay in PostgreSQL**. Install `backend/requirements-firebase.txt` only when enabling Firebase Storage. Default remains local disk.
-
-IDs remain string UUIDs; every tenant document/row keeps `organization_id` / `site_id`.  
-ANPR evidence = metadata in DB + object-storage keys (never image bytes in Firestore).  
-Do not delete PostgreSQL. ANPR ingest, visits, and the edge pipeline stay on the current stack.
+Do not delete PostgreSQL. ANPR ingest, visits, and the edge pipeline stay on the current stack until an explicit cutover.
 
 ## Explicitly not in V1 / Phase 6A
 

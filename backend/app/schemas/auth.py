@@ -31,6 +31,7 @@ class UserPublic(ORMModel):
     is_active: bool
     last_login_at: datetime | None = None
     site_ids: list[str] = []
+    auth_provider: str | None = None
 
 
 class LoginResponse(TokenResponse):

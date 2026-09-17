@@ -8,13 +8,16 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import client_ip, get_db, get_tenant, require_permission
 from app.core.exceptions import NotFoundError
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.anpr_event import AnprEvent
 from app.models.enums import AuditAction, VisitStatus
 from app.models.site import Site
 from app.models.vehicle import Vehicle
 from app.models.vehicle_visit import VehicleVisit
+from app.repositories import anpr_event_repo, vehicle_repo, visit_repo
 from app.schemas.event import EventOut
 from app.schemas.vehicle import VehicleDetail, VehicleOut, VehicleVisitorUpdate, VisitOut, VisitResolveRequest
+from app.services import firestore_domain as fs
 from app.services.audit import write_audit
 from app.services.event import serialize_event
 from app.services.plate import normalize_plate
@@ -24,7 +27,25 @@ from app.services.visit import format_duration
 router = APIRouter(tags=["vehicles"])
 
 
-def _visit_out(v: VehicleVisit) -> VisitOut:
+def _visit_out_orm(v: VehicleVisit) -> VisitOut:
+    return VisitOut(
+        id=v.id,
+        organization_id=v.organization_id,
+        site_id=v.site_id,
+        vehicle_id=v.vehicle_id,
+        plate_normalized=v.plate_normalized,
+        entry_event_id=v.entry_event_id,
+        exit_event_id=v.exit_event_id,
+        entry_at=v.entry_at,
+        exit_at=v.exit_at,
+        gate_id=v.gate_id,
+        duration_seconds=v.duration_seconds,
+        status=v.status,
+        duration_label=format_duration(v.duration_seconds),
+    )
+
+
+def _visit_out_record(v) -> VisitOut:
     return VisitOut(
         id=v.id,
         organization_id=v.organization_id,
@@ -45,10 +66,14 @@ def _visit_out(v: VehicleVisit) -> VisitOut:
 @router.get("/vehicles", response_model=list[VehicleOut])
 async def search_vehicles(
     q: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.VEHICLE_READ)),
 ) -> list[VehicleOut]:
+    if is_firestore():
+        rows = await fs.list_vehicles(ctx, q=q)
+        return [VehicleOut.model_validate(r) for r in rows]
+    assert db is not None
     stmt = select(Vehicle).order_by(Vehicle.last_seen.desc()).limit(100)
     stmt = ctx.apply_org(stmt, Vehicle.organization_id)
     if q:
@@ -61,10 +86,32 @@ async def search_vehicles(
 @router.get("/vehicles/{plate}", response_model=VehicleDetail)
 async def vehicle_detail(
     plate: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.VEHICLE_READ)),
 ) -> VehicleDetail:
+    if is_firestore():
+        vehicle = await fs.get_vehicle_by_plate(ctx, plate)
+        visits = await visit_repo().list_for_tenant(
+            organization_id=vehicle.organization_id,
+            limit=50,
+        )
+        visits = [v for v in visits if v.vehicle_id == vehicle.id]
+        events = await anpr_event_repo().list_for_tenant(
+            organization_id=vehicle.organization_id,
+            limit=50,
+        )
+        events = [e for e in events if e.vehicle_id == vehicle.id]
+        event_outs = []
+        for e in events:
+            event_outs.append(EventOut.model_validate(fs.serialize_event_record(e)))
+        return VehicleDetail(
+            vehicle=VehicleOut.model_validate(vehicle),
+            visits=[_visit_out_record(v) for v in visits],
+            events=event_outs,
+        )
+
+    assert db is not None
     compact = normalize_plate(plate).normalized
     stmt = select(Vehicle).where(Vehicle.plate_normalized == compact)
     stmt = ctx.apply_org(stmt, Vehicle.organization_id)
@@ -93,7 +140,7 @@ async def vehicle_detail(
     } if site_ids else {}
     return VehicleDetail(
         vehicle=VehicleOut.model_validate(vehicle),
-        visits=[_visit_out(v) for v in visits],
+        visits=[_visit_out_orm(v) for v in visits],
         events=[EventOut.model_validate(serialize_event(e, e.camera, sites.get(e.site_id))) for e in events],
     )
 
@@ -102,10 +149,16 @@ async def vehicle_detail(
 async def update_visitor(
     plate: str,
     body: VehicleVisitorUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.VEHICLE_VISITOR_WRITE)),
 ) -> VehicleOut:
+    if is_firestore():
+        data = body.model_dump(exclude_unset=True)
+        vehicle = await fs.update_vehicle(ctx, plate, data)
+        return VehicleOut.model_validate(vehicle)
+
+    assert db is not None
     compact = normalize_plate(plate).normalized
     stmt = select(Vehicle).where(Vehicle.plate_normalized == compact)
     stmt = ctx.apply_org(stmt, Vehicle.organization_id)
@@ -126,10 +179,35 @@ async def resolve_visit(
     visit_id: str,
     body: VisitResolveRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.VISIT_RESOLVE)),
 ) -> VisitOut:
+    if is_firestore():
+        visit = await visit_repo().get(visit_id)
+        if not visit:
+            raise NotFoundError("Visit not found")
+        ctx.ensure_org(visit.organization_id)
+        visit.status = str(body.status)
+        if body.status == VisitStatus.MANUALLY_RESOLVED or str(body.status) == str(VisitStatus.MANUALLY_RESOLVED):
+            vehicle = await vehicle_repo().get(visit.vehicle_id)
+            if vehicle:
+                vehicle.currently_inside = False
+                await vehicle_repo().save(vehicle)
+        await visit_repo().save(visit)
+        await write_audit(
+            db,
+            action=AuditAction.VISIT_RESOLVE,
+            user_id=ctx.user.id,
+            organization_id=visit.organization_id,
+            ip=client_ip(request),
+            target_type="vehicle_visit",
+            target_id=visit.id,
+            extra={"status": body.status, "notes": body.notes},
+        )
+        return _visit_out_record(visit)
+
+    assert db is not None
     visit = await db.get(VehicleVisit, visit_id)
     if not visit:
         raise NotFoundError("Visit not found")
@@ -151,4 +229,4 @@ async def resolve_visit(
     )
     await db.commit()
     await db.refresh(visit)
-    return _visit_out(visit)
+    return _visit_out_orm(visit)

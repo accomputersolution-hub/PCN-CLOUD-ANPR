@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_tenant, require_permission
 from app.core.rbac import Permission
+from app.core.runtime import is_firestore
 from app.models.anpr_event import AnprEvent
 from app.models.camera import Camera
 from app.models.enums import CameraStatus, Direction, VisitStatus
@@ -17,6 +18,7 @@ from app.models.site import Site
 from app.models.vehicle_visit import VehicleVisit
 from app.schemas.dashboard import DashboardSummary
 from app.schemas.event import EventOut
+from app.services import firestore_domain as fs
 from app.services.event import serialize_event
 from app.services.reports import count_direction, day_bounds
 from app.services.tenant import TenantContext
@@ -27,10 +29,16 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/summary", response_model=DashboardSummary)
 async def summary(
     site_id: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant),
     _: object = Depends(require_permission(Permission.DASHBOARD_READ)),
 ) -> DashboardSummary:
+    if is_firestore():
+        payload = await fs.dashboard_summary_fs(ctx, site_id=site_id)
+        payload["recent_events"] = [EventOut.model_validate(e) for e in payload["recent_events"]]
+        return DashboardSummary.model_validate(payload)
+
+    assert db is not None
     tz_name = "Asia/Kolkata"
     if site_id:
         ctx.ensure_site(site_id)

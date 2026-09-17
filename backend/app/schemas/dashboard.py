@@ -23,3 +23,6 @@ class SystemHealth(ORMModel):
     time: datetime
     camera_offline_count: int
     edge_connected_count: int
+    auth_provider: str | None = None
+    datastore_provider: str | None = None
+    storage_provider: str | None = None

@@ -15,7 +15,8 @@ router = APIRouter(prefix="/anpr", tags=["anpr-dev"])
 
 class AnprTestPlate(BaseModel):
     raw_text: str = ""
-    normalized_text: str = ""
+    # Pipeline emits None for watermark / non-plate OCR (selection rejects).
+    normalized_text: str | None = ""
     confidence: float = 0.0
     ocr_confidence: float = 0.0
     plate_confidence: float = 0.0

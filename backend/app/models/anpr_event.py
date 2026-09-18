@@ -47,6 +47,7 @@ class AnprEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sync_status: Mapped[SyncStatus] = mapped_column(String(16), default=SyncStatus.SYNCED, nullable=False)
     classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operator_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     vehicle: Mapped[Vehicle | None] = relationship(back_populates="events")
     visit: Mapped[VehicleVisit | None] = relationship(back_populates="events", foreign_keys=[visit_id])

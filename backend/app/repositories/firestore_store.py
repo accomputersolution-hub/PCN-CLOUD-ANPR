@@ -448,16 +448,24 @@ class FirestoreVehicleRepository:
         data = await _to_thread(_get_doc, db, "vehicles", vehicle_id)
         return VehicleRecord.model_validate(data) if data else None
 
-    async def get_by_plate(self, organization_id: str, plate_normalized: str) -> VehicleRecord | None:
+    async def get_by_plate(
+        self,
+        organization_id: str | None,
+        plate_normalized: str,
+    ) -> VehicleRecord | None:
+        """Lookup by plate. ``organization_id=None`` scans across orgs (SUPER_ADMIN)."""
         db = _ensure_ready("vehicles")
 
         def _find() -> dict[str, Any] | None:
-            q = (
-                db.collection("vehicles")
-                .where("organization_id", "==", organization_id)
-                .where("plate_normalized", "==", plate_normalized)
-                .limit(1)
-            )
+            col = db.collection("vehicles")
+            if organization_id:
+                q = (
+                    col.where("organization_id", "==", organization_id)
+                    .where("plate_normalized", "==", plate_normalized)
+                    .limit(1)
+                )
+            else:
+                q = col.where("plate_normalized", "==", plate_normalized).limit(1)
             for snap in q.stream():
                 data = snap.to_dict() or {}
                 data["id"] = snap.id
@@ -478,6 +486,26 @@ class FirestoreVehicleRepository:
         )
         return [VehicleRecord.model_validate(r) for r in rows]
 
+    async def list_by_plate(self, plate_normalized: str, *, limit: int = 50) -> list[VehicleRecord]:
+        """Cross-org plate search (SUPER_ADMIN). Single-field equality — no composite index."""
+        db = _ensure_ready("vehicles")
+
+        def _find() -> list[dict[str, Any]]:
+            q = (
+                db.collection("vehicles")
+                .where("plate_normalized", "==", plate_normalized)
+                .limit(limit)
+            )
+            out: list[dict[str, Any]] = []
+            for snap in q.stream():
+                data = snap.to_dict() or {}
+                data["id"] = snap.id
+                out.append(data)
+            return out
+
+        rows = await _to_thread(_find)
+        return [VehicleRecord.model_validate(r) for r in rows]
+
     async def add(self, record: VehicleRecord) -> VehicleRecord:
         db = _ensure_ready("vehicles")
         await _to_thread(_set_doc, db, "vehicles", record.id, _dump(record))
@@ -496,30 +524,38 @@ class FirestoreAnprEventRepository:
     async def list_for_tenant(
         self,
         *,
-        organization_id: str,
+        organization_id: str | None,
         site_ids: list[str] | None = None,
         site_id: str | None = None,
         limit: int = 50,
         start_after: datetime | None = None,
     ) -> list[AnprEventRecord]:
+        """List recent ANPR events for a tenant.
+
+        ``organization_id=None`` is allowed for SUPER_ADMIN cross-tenant scans
+        (bounded by ``limit``). Tenant filters are still applied in memory.
+        """
         db = _ensure_ready("anpr events")
         page = clamp_page_size(limit)
 
         def _list() -> list[dict[str, Any]]:
-            q = (
-                db.collection("anprEvents")
-                .where("organization_id", "==", organization_id)
-                .order_by("timestamp", direction="DESCENDING")
-                .limit(page)
-            )
-            if site_id:
+            col = db.collection("anprEvents")
+            if organization_id and site_id:
                 q = (
-                    db.collection("anprEvents")
-                    .where("organization_id", "==", organization_id)
+                    col.where("organization_id", "==", organization_id)
                     .where("site_id", "==", site_id)
                     .order_by("timestamp", direction="DESCENDING")
                     .limit(page)
                 )
+            elif organization_id:
+                q = (
+                    col.where("organization_id", "==", organization_id)
+                    .order_by("timestamp", direction="DESCENDING")
+                    .limit(page)
+                )
+            else:
+                # Super-admin / unscoped: recent events across orgs (cost-bounded).
+                q = col.order_by("timestamp", direction="DESCENDING").limit(page)
             if start_after is not None:
                 q = q.start_after({"timestamp": start_after})
             out: list[dict[str, Any]] = []
@@ -527,7 +563,12 @@ class FirestoreAnprEventRepository:
                 data = snap.to_dict() or {}
                 data["id"] = snap.id
                 data = _strip_binary(data)
-                if tenant_filter_ok(data, organization_id=organization_id, site_ids=site_ids, site_id=site_id):
+                if tenant_filter_ok(
+                    data,
+                    organization_id=organization_id,
+                    site_ids=site_ids,
+                    site_id=site_id,
+                ):
                     out.append(data)
             return out
 

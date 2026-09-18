@@ -127,6 +127,7 @@ class AnprEventRecord(BaseModel):
     sync_status: str = "SYNCED"
     classification: str | None = None
     notes: str | None = None
+    operator_user_id: str | None = None
 
 
 class EdgeAgentRecord(BaseModel):

@@ -53,6 +53,10 @@ class ANPRSettings:
     ocr_upscale_3x: bool = True
     ocr_save_debug_crops: bool = True
     ocr_debug_dir: str = "./output/ocr_debug"
+    # Plate detector mode: opencv (default) | ai | compare
+    plate_detector: str = "opencv"
+    # Local weights dir for AI plate detector (never auto-downloaded)
+    ai_plate_model_dir: str = ""
 
 
 @lru_cache
@@ -60,6 +64,9 @@ def get_anpr_settings() -> ANPRSettings:
     mode = os.getenv("ANPR_PROVIDER_MODE", "real").strip().lower()
     if mode not in {"real", "mock"}:
         mode = "real"
+    plate_mode = os.getenv("ANPR_PLATE_DETECTOR", "opencv").strip().lower()
+    if plate_mode not in {"opencv", "ai", "compare"}:
+        plate_mode = "opencv"
     return ANPRSettings(
         anpr_enabled=_bool("ANPR_ENABLED", True),
         ocr_enabled=_bool("OCR_ENABLED", True),
@@ -76,6 +83,8 @@ def get_anpr_settings() -> ANPRSettings:
         ocr_upscale_3x=_bool("ANPR_OCR_UPSCALE_3X", True),
         ocr_save_debug_crops=_bool("ANPR_OCR_SAVE_DEBUG_CROPS", True),
         ocr_debug_dir=os.getenv("ANPR_OCR_DEBUG_DIR", "./output/ocr_debug"),
+        plate_detector=plate_mode,
+        ai_plate_model_dir=os.getenv("ANPR_AI_PLATE_MODEL_DIR", "").strip(),
     )
 
 

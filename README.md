@@ -42,6 +42,9 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
+# From backend/ — anpr-engine is auto-added to sys.path; optional:
+#   set PYTHONPATH=..\anpr-engine;%PYTHONPATH%
+#   .\.venv\Scripts\pip install -e ..\anpr-engine
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 3. Frontend (from frontend/)

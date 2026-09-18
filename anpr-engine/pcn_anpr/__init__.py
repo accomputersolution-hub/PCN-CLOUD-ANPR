@@ -9,7 +9,7 @@ Licenses (Phase 6A defaults):
 - No AGPL Ultralytics/YOLO dependency is included by default
 """
 
-from pcn_anpr.factory import build_pipeline
+from pcn_anpr.factory import build_pipeline, build_plate_detector
 from pcn_anpr.interfaces import OCRProvider, PlateDetector, VehicleDetector
 from pcn_anpr.pipeline import ANPRPipeline
 
@@ -19,4 +19,5 @@ __all__ = [
     "PlateDetector",
     "VehicleDetector",
     "build_pipeline",
+    "build_plate_detector",
 ]

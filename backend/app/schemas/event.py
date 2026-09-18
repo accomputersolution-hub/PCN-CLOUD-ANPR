@@ -31,6 +31,7 @@ class EventOut(ORMModel):
     sync_status: SyncStatus
     classification: str | None
     notes: str | None
+    operator_user_id: str | None = None
     camera_name: str | None = None
     gate_name: str | None = None
     site_name: str | None = None

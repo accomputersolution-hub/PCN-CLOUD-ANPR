@@ -26,6 +26,8 @@ class PlateObservation:
     plate_bbox: list[int] = field(default_factory=list)
     padded_bbox: list[int] = field(default_factory=list)
     vehicle_bbox: list[int] = field(default_factory=list)
+    track_id: str | None = None
+    on_primary: bool = False
     processing_ms: int = 0
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -49,7 +51,12 @@ class ConfirmedPlate:
 
 
 class TemporalPlateTracker:
-    """Per-camera rolling window of OCR observations → confirmed plates."""
+    """Per-camera rolling window of OCR observations → confirmed plates.
+
+    Observations are keyed by ``(camera_id, track_id or plate)`` so plates from
+    different vehicles never overwrite each other. Temporal confirmation still
+    requires repeated consistent readings before creating a live event.
+    """
 
     def __init__(
         self,
@@ -63,15 +70,21 @@ class TemporalPlateTracker:
         self.min_ocr_confidence = min_ocr_confidence
         self._obs: dict[str, deque[PlateObservation]] = defaultdict(deque)
 
+    def _buf_key(self, observation: PlateObservation) -> str:
+        # Prefer vehicle track isolation; fall back to plate text for legacy paths.
+        track = observation.track_id or observation.plate_normalized or "unknown"
+        return f"{observation.camera_id}|{track}"
+
     def add(self, observation: PlateObservation) -> ConfirmedPlate | None:
         if not observation.plate_normalized:
             return None
         if observation.ocr_confidence < self.min_ocr_confidence:
             return None
 
-        buf = self._obs[observation.camera_id]
+        key = self._buf_key(observation)
+        buf = self._obs[key]
         buf.append(observation)
-        self._prune(observation.camera_id, observation.timestamp)
+        self._prune(key, observation.timestamp)
 
         plate = observation.plate_normalized
         matching = [o for o in buf if o.plate_normalized == plate]
@@ -82,8 +95,6 @@ class TemporalPlateTracker:
         if avg_ocr < self.min_ocr_confidence:
             return None
 
-        # Consistency: all matching obs must share the same normalized plate (already filtered).
-        # Prefer highest OCR confidence frame as snapshot source.
         best = max(matching, key=lambda o: (o.ocr_confidence, o.plate_confidence))
         confirmed = ConfirmedPlate(
             camera_id=observation.camera_id,
@@ -101,14 +112,11 @@ class TemporalPlateTracker:
             vehicle_bbox=list(best.vehicle_bbox),
             processing_ms=best.processing_ms,
         )
-        # Clear matching observations so we don't re-confirm until new passes
-        self._obs[observation.camera_id] = deque(
-            o for o in buf if o.plate_normalized != plate
-        )
+        self._obs[key] = deque(o for o in buf if o.plate_normalized != plate)
         return confirmed
 
-    def _prune(self, camera_id: str, now: datetime) -> None:
-        buf = self._obs[camera_id]
+    def _prune(self, key: str, now: datetime) -> None:
+        buf = self._obs[key]
         cutoff = now - self.window
         while buf and buf[0].timestamp < cutoff:
             buf.popleft()

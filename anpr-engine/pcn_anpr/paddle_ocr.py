@@ -95,10 +95,32 @@ class PaddleOCRProvider(OCRProvider):
     def read(self, plate_crop: Any) -> OCRResult:
         if plate_crop is None:
             return OCRResult(text="", confidence=0.0, raw_text="")
-        ocr = self._ensure()
+
+        from pcn_anpr import ocr_perf
+
+        sess = ocr_perf.get_session()
+        meta = ocr_perf.current_meta()
+        model_ready_before = self._ocr is not None
+        if sess is not None and sess.enabled:
+            sess.note_model_ready(model_ready_before)
+
+        init_happened = False
+        init_ms = 0.0
+        if self._ocr is None and not self._init_error:
+            t_init = time.perf_counter()
+            ocr = self._ensure()
+            init_ms = (time.perf_counter() - t_init) * 1000.0
+            init_happened = model_ready_before is False and self._ocr is not None
+            if sess is not None and sess.enabled and init_happened:
+                sess.record_model_init(init_ms)
+        else:
+            ocr = self._ensure()
+
         if ocr is None:
             return OCRResult(text="", confidence=0.0, raw_text="")
 
+        t_inf = time.perf_counter()
+        parsed = OCRResult(text="", confidence=0.0, raw_text="")
         try:
             import numpy as np
 
@@ -124,11 +146,39 @@ class PaddleOCRProvider(OCRProvider):
                 except Exception:
                     result = None
             if result is None:
-                return OCRResult(text="", confidence=0.0, raw_text="")
+                parsed = OCRResult(text="", confidence=0.0, raw_text="")
+            else:
+                parsed = parse_paddle_ocr_result(result)
         except Exception:  # noqa: BLE001
-            return OCRResult(text="", confidence=0.0, raw_text="")
+            parsed = OCRResult(text="", confidence=0.0, raw_text="")
+        finally:
+            inf_ms = (time.perf_counter() - t_inf) * 1000.0
+            if sess is not None and sess.enabled:
+                fp = meta.get("fingerprint") or ocr_perf.image_fingerprint(plate_crop)
+                size = meta.get("size") or ocr_perf.image_size_str(plate_crop)
+                rec = sess.add_call(
+                    stage=str(meta.get("stage") or "unknown"),
+                    crop_id=str(meta.get("crop_id") or "unknown"),
+                    variant=str(meta.get("variant") or "unknown"),
+                    size=str(size),
+                    time_ms=inf_ms,
+                    fingerprint=str(fp),
+                    model_init_during_call=init_happened,
+                    raw_preview=str(parsed.raw_text or parsed.text or ""),
+                    confidence=float(parsed.confidence or 0.0),
+                )
+                crop = meta.get("crop_session")
+                if crop is not None:
+                    crop.calls += 1
+                print(
+                    f"[OCR PERF] call={rec.call} stage={rec.stage} crop={rec.crop_id} "
+                    f"variant={rec.variant} size={rec.size} time={rec.time_ms:.2f}ms"
+                    f"{' DUP' if rec.duplicate else ''}"
+                    f"{' INIT' if rec.model_init_during_call else ''}",
+                    flush=True,
+                )
 
-        return parse_paddle_ocr_result(result)
+        return parsed
 
 
 def parse_paddle_ocr_result(result: Any) -> OCRResult:

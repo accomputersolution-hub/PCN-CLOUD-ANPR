@@ -9,6 +9,7 @@ import {
   Settings2,
   Shield,
   Sparkles,
+  ScanLine,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuth } from "../shared/auth/AuthProvider";
@@ -19,6 +20,7 @@ const nav = [
   { to: "/events", label: "Events", icon: Radio },
   { to: "/vehicles", label: "Search", icon: Search },
   { to: "/cameras", label: "Cameras", icon: Camera },
+  { to: "/manual-anpr", label: "Manual ANPR", icon: ScanLine },
   { to: "/mock", label: "Mock ANPR", icon: Sparkles },
 ];
 
@@ -126,7 +128,7 @@ export function AppLayout() {
         <main className="flex-1 px-4 py-4 pb-24 md:px-8 md:py-8 md:pb-8">
           <Outlet />
         </main>
-        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-slate-200 bg-white md:hidden">
+        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-slate-200 bg-white md:hidden">
           {nav.map((item) => (
             <NavLink
               key={item.to}

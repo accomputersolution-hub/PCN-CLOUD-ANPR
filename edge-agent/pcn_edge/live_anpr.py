@@ -164,6 +164,16 @@ class LiveAnprWorker:
             except Exception:
                 settings = None
             self._pipeline = build_pipeline(settings)
+            try:
+                from pcn_anpr.vehicle_track import VehicleTracker
+
+                self._pipeline.vehicle_tracker = VehicleTracker(
+                    min_confirm_observations=self.settings.anpr_confirm_min_observations,
+                    confirm_window_seconds=self.settings.anpr_confirm_window_seconds,
+                    min_ocr_confidence=self.settings.anpr_min_ocr_confidence,
+                )
+            except Exception:  # noqa: BLE001
+                self._pipeline.vehicle_tracker = None
         return self._pipeline
 
     def _warm_up(self) -> None:
@@ -260,7 +270,17 @@ class LiveAnprWorker:
             )
 
         plates = result.get("plates") or []
-        best = plates[0] if plates else None
+        vehicle_results = result.get("vehicle_results") or []
+        vehicles = result.get("vehicles") or []
+        # Prefer primary vehicle's plate for the "best" debug line, but confirm
+        # every tracked vehicle independently below.
+        best = None
+        for p in plates:
+            if p.get("on_primary_vehicle") and p.get("ocr_confident") and p.get("normalized_text"):
+                best = p
+                break
+        if best is None:
+            best = plates[0] if plates else None
         if not best:
             return
 
@@ -288,48 +308,118 @@ class LiveAnprWorker:
         if not self.settings.anpr_live_enabled:
             return
 
-        if not best.get("ocr_confident"):
-            return
-        norm = best.get("normalized_text") or best.get("normalized_plate")
-        if not norm:
-            return
-        if float(best.get("ocr_confidence") or 0) < self.settings.anpr_min_ocr_confidence:
-            return
-        if float(best.get("plate_confidence") or 0) < self.settings.anpr_min_plate_confidence:
-            return
+        # Build per-track observations — never let one vehicle overwrite another.
+        candidates: list[dict[str, Any]] = []
+        if vehicle_results:
+            for vr in vehicle_results:
+                if not vr.get("matches_pattern") or not vr.get("best_plate"):
+                    continue
+                plate_row = next(
+                    (
+                        p
+                        for p in plates
+                        if p.get("normalized_text") == vr.get("best_plate")
+                        and (
+                            (vr.get("track_id") and p.get("track_id") == vr.get("track_id"))
+                            or p.get("vehicle_index") == vr.get("vehicle_index")
+                        )
+                    ),
+                    None,
+                )
+                candidates.append(
+                    {
+                        "norm": vr.get("best_plate"),
+                        "raw": (plate_row or {}).get("raw_text") or vr.get("best_raw") or vr.get("best_plate"),
+                        "ocr_confidence": float(
+                            (plate_row or {}).get("ocr_confidence")
+                            or vr.get("ocr_confidence")
+                            or 0
+                        ),
+                        "plate_confidence": float((plate_row or {}).get("plate_confidence") or 0),
+                        "ocr_confident": bool((plate_row or {}).get("ocr_confident", True)),
+                        "bbox": list((plate_row or {}).get("bbox") or []),
+                        "padded_bbox": list(
+                            (plate_row or {}).get("padded_bbox")
+                            or (plate_row or {}).get("bbox")
+                            or []
+                        ),
+                        "track_id": vr.get("track_id"),
+                        "on_primary": bool(vr.get("is_primary")),
+                        "vehicle_bbox": list(vr.get("bbox") or []),
+                        "vehicle_confidence": float(vr.get("confidence") or 0),
+                    }
+                )
+        else:
+            for p in plates:
+                if not p.get("ocr_confident"):
+                    continue
+                norm = p.get("normalized_text") or p.get("normalized_plate")
+                if not norm:
+                    continue
+                vi = p.get("vehicle_index")
+                vrow = next((v for v in vehicles if v.get("index") == vi), None)
+                if vrow is None and p.get("on_primary_vehicle"):
+                    vrow = next((v for v in vehicles if v.get("is_primary")), None)
+                if vrow is None and vehicles:
+                    vrow = vehicles[0]
+                candidates.append(
+                    {
+                        "norm": norm,
+                        "raw": p.get("raw_text") or norm,
+                        "ocr_confidence": float(p.get("ocr_confidence") or 0),
+                        "plate_confidence": float(p.get("plate_confidence") or 0),
+                        "ocr_confident": True,
+                        "bbox": list(p.get("bbox") or []),
+                        "padded_bbox": list(p.get("padded_bbox") or p.get("bbox") or []),
+                        "track_id": p.get("track_id") or (vrow or {}).get("track_id"),
+                        "on_primary": bool(p.get("on_primary_vehicle") or (vrow or {}).get("is_primary")),
+                        "vehicle_bbox": list((vrow or {}).get("bbox") or []),
+                        "vehicle_confidence": float((vrow or {}).get("confidence") or 0),
+                    }
+                )
 
-        vehicles = result.get("vehicles") or []
-        vehicle_conf = float(vehicles[0]["confidence"]) if vehicles else 0.0
-        vehicle_bbox = list(vehicles[0]["bbox"]) if vehicles else []
+        for cand in candidates:
+            if not cand.get("ocr_confident"):
+                continue
+            if float(cand["ocr_confidence"]) < self.settings.anpr_min_ocr_confidence:
+                continue
+            if float(cand["plate_confidence"]) < self.settings.anpr_min_plate_confidence:
+                continue
 
-        obs = PlateObservation(
-            camera_id=frame.camera_id,
-            plate_normalized=str(norm),
-            plate_raw=str(best.get("raw_text") or norm),
-            ocr_confidence=float(best.get("ocr_confidence") or 0),
-            plate_confidence=float(best.get("plate_confidence") or 0),
-            vehicle_confidence=vehicle_conf,
-            timestamp=frame.captured_at if frame.captured_at.tzinfo else frame.captured_at.replace(tzinfo=UTC),
-            frame_jpeg=frame.data,
-            frame_sequence=frame.sequence,
-            plate_bbox=list(best.get("bbox") or []),
-            padded_bbox=list(best.get("padded_bbox") or best.get("bbox") or []),
-            vehicle_bbox=vehicle_bbox,
-            processing_ms=int(elapsed_ms),
-        )
-        confirmed = self.tracker.add(obs)
-        if not confirmed:
-            return
-
-        self.confirmations += 1
-        if not self.cooldown.allow(confirmed.camera_id, confirmed.plate_normalized, confirmed.timestamp):
-            logger.info(
-                "anpr.live.cooldown_skip camera=%s plate=%s",
-                confirmed.camera_id,
-                confirmed.plate_normalized,
+            obs = PlateObservation(
+                camera_id=frame.camera_id,
+                plate_normalized=str(cand["norm"]),
+                plate_raw=str(cand["raw"]),
+                ocr_confidence=float(cand["ocr_confidence"]),
+                plate_confidence=float(cand["plate_confidence"]),
+                vehicle_confidence=float(cand["vehicle_confidence"]),
+                timestamp=frame.captured_at if frame.captured_at.tzinfo else frame.captured_at.replace(tzinfo=UTC),
+                frame_jpeg=frame.data,
+                frame_sequence=frame.sequence,
+                plate_bbox=list(cand["bbox"]),
+                padded_bbox=list(cand["padded_bbox"]),
+                vehicle_bbox=list(cand["vehicle_bbox"]),
+                track_id=cand.get("track_id"),
+                on_primary=bool(cand.get("on_primary")),
+                processing_ms=int(elapsed_ms),
             )
-            return
+            confirmed = self.tracker.add(obs)
+            if not confirmed:
+                continue
 
+            self.confirmations += 1
+            if not self.cooldown.allow(confirmed.camera_id, confirmed.plate_normalized, confirmed.timestamp):
+                logger.info(
+                    "anpr.live.cooldown_skip camera=%s plate=%s track=%s",
+                    confirmed.camera_id,
+                    confirmed.plate_normalized,
+                    cand.get("track_id"),
+                )
+                continue
+            self.cooldown.mark(confirmed.camera_id, confirmed.plate_normalized, confirmed.timestamp)
+            self._emit_confirmed(confirmed)
+
+    def _emit_confirmed(self, confirmed: Any) -> None:
         direction = self.camera_directions.get(confirmed.camera_id, "ENTRY")
         if direction == "BOTH":
             direction = "ENTRY"
@@ -368,7 +458,6 @@ class LiveAnprWorker:
             vehicle_crop_bytes=vehicle_crop,
             timestamp=confirmed.timestamp,
         )
-        self.cooldown.mark(confirmed.camera_id, confirmed.plate_normalized, confirmed.timestamp)
         self.events_created += 1
         logger.info(
             "anpr.live.event_enqueued id=%s camera=%s plate=%s direction=%s obs=%s snapshot=%s",

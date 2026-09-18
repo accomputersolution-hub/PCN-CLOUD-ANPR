@@ -37,7 +37,36 @@ def test_indian_validation_multi_state() -> None:
     assert matches_indian_plate("MH12AB1234")
     assert matches_indian_plate("DL01CA1234")
     assert matches_indian_plate("KA05MN6789")
+    assert matches_indian_plate("KA05KP7941")
+    assert matches_indian_plate("KL03AF786")
     assert not matches_indian_plate("XX")
+    # Shape-only OCR misreads must not match (invalid RTO state ``AD``).
+    assert not matches_indian_plate("AD5XP7941")
+    assert normalize_plate("AD5XP7941").matches_known_pattern is False
+    assert normalize_plate("KA05KP7941").matches_known_pattern is True
+    assert normalize_plate("KA05KP7941").normalized == "KA05KP7941"
+    assert normalize_plate("KL03AF786").normalized == "KL03AF786"
+    assert normalize_plate("KL03AF786").matches_known_pattern is True
+
+def test_bharat_series_and_ind_marker() -> None:
+    from pcn_anpr.normalize import is_plate_marker_noise, sanitize_plate_text
+
+    assert matches_indian_plate("22BH6517TA")
+    assert matches_indian_plate("22BH6517A")
+    assert normalize_plate("22 BH 6517 TA").normalized == "22BH6517TA"
+    assert normalize_plate("22 BH 6517 TA").matches_known_pattern is True
+    # IND legend glued to a full BH plate must sanitize to the registration only
+    assert sanitize_plate_text("IND22BH6517TA") == "22BH6517TA"
+    assert normalize_plate("IND22BH6517TA").normalized == "22BH6517TA"
+    assert normalize_plate("IND22BH6517TA").matches_known_pattern is True
+    # IND alone is never a valid plate
+    assert is_plate_marker_noise("IND")
+    assert is_plate_marker_noise("ind")
+    assert not matches_indian_plate("IND")
+    assert normalize_plate("IND").matches_known_pattern is False
+    # Standard formats still work after sanitize
+    assert normalize_plate("MH20DV2366").normalized == "MH20DV2366"
+    assert normalize_plate("INDMH20DV2366").normalized == "MH20DV2366"
 
 
 def test_no_blind_confusable() -> None:
@@ -122,6 +151,8 @@ def test_detector_on_synthetic_plate(tmp_path: Path) -> None:
 
 
 def test_batch_cli(tmp_path: Path) -> None:
+    import os
+
     import cv2
 
     folder = tmp_path / "frames"
@@ -130,19 +161,37 @@ def test_batch_cli(tmp_path: Path) -> None:
         img = np.zeros((80, 120, 3), dtype=np.uint8)
         cv2.imencode(".jpg", img)[1].tofile(str(folder / f"f{i}.jpg"))
     out = tmp_path / "out"
-    code = cli_main(["--folder", str(folder), "--output-dir", str(out), "--provider", "mock", "--no-annotate"])
-    assert code == 0
-    results = json.loads((out / "results.json").read_text(encoding="utf-8"))
-    assert len(results) == 2
+    prev = os.environ.get("ANPR_PROVIDER_MODE")
+    try:
+        code = cli_main(["--folder", str(folder), "--output-dir", str(out), "--provider", "mock", "--no-annotate"])
+        assert code == 0
+        results = json.loads((out / "results.json").read_text(encoding="utf-8"))
+        assert len(results) == 2
+    finally:
+        if prev is None:
+            os.environ.pop("ANPR_PROVIDER_MODE", None)
+        else:
+            os.environ["ANPR_PROVIDER_MODE"] = prev
+        clear_anpr_settings_cache()
 
 
 def test_cli_single_mock(tmp_path: Path) -> None:
+    import os
+
     import cv2
 
     img = np.zeros((80, 120, 3), dtype=np.uint8)
     path = tmp_path / "one.jpg"
     cv2.imencode(".jpg", img)[1].tofile(str(path))
     out = tmp_path / "out"
-    code = cli_main(["--image", str(path), "--output-dir", str(out), "--provider", "mock"])
-    assert code == 0
-    assert (out / "results.json").exists()
+    prev = os.environ.get("ANPR_PROVIDER_MODE")
+    try:
+        code = cli_main(["--image", str(path), "--output-dir", str(out), "--provider", "mock"])
+        assert code == 0
+        assert (out / "results.json").exists()
+    finally:
+        if prev is None:
+            os.environ.pop("ANPR_PROVIDER_MODE", None)
+        else:
+            os.environ["ANPR_PROVIDER_MODE"] = prev
+        clear_anpr_settings_cache()

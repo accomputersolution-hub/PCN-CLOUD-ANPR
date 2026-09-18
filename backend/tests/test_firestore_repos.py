@@ -154,6 +154,138 @@ async def test_anpr_event_rejects_missing_org_scope(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_anpr_event_super_unscoped_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SUPER_ADMIN may list recent events without an organization_id filter."""
+    _firebase_env(monkeypatch)
+    events: list[dict] = [
+        {
+            "id": "e-manual",
+            "organization_id": "org-a",
+            "site_id": "s1",
+            "gate_id": "g1",
+            "camera_id": "c1",
+            "direction": "ENTRY",
+            "plate_text": "MH20DV2366",
+            "plate_normalized": "MH20DV2366",
+            "source_type": "MANUAL",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "local_timestamp": datetime.now(UTC).isoformat(),
+        }
+    ]
+    seen: dict[str, object] = {"order_by": False, "where": False}
+
+    class FakeSnap:
+        def __init__(self, data: dict):
+            self.id = data["id"]
+            self._data = data
+
+        def to_dict(self):
+            return dict(self._data)
+
+    class FakeQuery:
+        def where(self, *a, **k):
+            seen["where"] = True
+            return self
+
+        def order_by(self, *a, **k):
+            seen["order_by"] = True
+            return self
+
+        def limit(self, n):
+            return self
+
+        def start_after(self, *a, **k):
+            return self
+
+        def stream(self):
+            for row in events:
+                yield FakeSnap(row)
+
+    class FakeCollection:
+        def where(self, *a, **k):
+            seen["where"] = True
+            return FakeQuery()
+
+        def order_by(self, *a, **k):
+            seen["order_by"] = True
+            return FakeQuery()
+
+    db = MagicMock()
+    db.collection.return_value = FakeCollection()
+    monkeypatch.setattr("app.repositories.firestore_store.get_firestore_client", lambda: db)
+
+    repo = FirestoreAnprEventRepository()
+    rows = await repo.list_for_tenant(organization_id=None, limit=10)
+    assert len(rows) == 1
+    assert rows[0].source_type == "MANUAL"
+    assert rows[0].plate_normalized == "MH20DV2366"
+    assert seen["order_by"] is True
+    assert seen["where"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_events_fs_super_admin_includes_manual(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.domain.records import AnprEventRecord
+    from app.identity.principal import Principal
+    from app.models.enums import UserRole
+    from app.services import firestore_domain as fs
+    from app.services.tenant import TenantContext
+
+    now = datetime.now(UTC)
+    event = AnprEventRecord(
+        id="ev1",
+        organization_id="org-a",
+        site_id="site-a",
+        gate_id="gate-a",
+        camera_id="cam-a",
+        direction="ENTRY",
+        plate_text="MH20DV2366",
+        plate_normalized="MH20DV2366",
+        source_type="MANUAL",
+        timestamp=now,
+        local_timestamp=now,
+        operator_user_id="op1",
+    )
+
+    class FakeEventRepo:
+        async def list_for_tenant(self, **kwargs):
+            assert kwargs.get("organization_id") is None
+            return [event]
+
+    class FakeCamRepo:
+        async def get(self, _id):
+            return None
+
+    class FakeSiteRepo:
+        async def get(self, _id):
+            return None
+
+    class FakeGateRepo:
+        async def get(self, _id):
+            return None
+
+    monkeypatch.setattr(fs, "anpr_event_repo", lambda: FakeEventRepo())
+    monkeypatch.setattr(fs, "camera_repo", lambda: FakeCamRepo())
+    monkeypatch.setattr(fs, "site_repo", lambda: FakeSiteRepo())
+    monkeypatch.setattr(fs, "gate_repo", lambda: FakeGateRepo())
+
+    ctx = TenantContext(
+        Principal(
+            id="super",
+            email="admin@pcncloud.in",
+            full_name="Super",
+            role=UserRole.SUPER_ADMIN,
+            organization_id=None,
+        ),
+        site_ids=[],
+    )
+    items, total = await fs.list_events(ctx, page=1, page_size=25)
+    assert total == 1
+    assert items[0]["plate_normalized"] == "MH20DV2366"
+    assert items[0]["source_type"] == "MANUAL"
+
+
+@pytest.mark.asyncio
 async def test_gateway_tenant_site_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     _firebase_env(monkeypatch)
     from app.domain.connectivity import GatewayRecord

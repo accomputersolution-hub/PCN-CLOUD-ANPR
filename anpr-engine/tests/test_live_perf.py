@@ -58,6 +58,120 @@ def test_live_mode_uses_fewer_ocr_passes_than_batch() -> None:
     assert batch.calls > live.calls
 
 
+def test_adaptive_fast_path_early_exits_and_preserves_full_fallback() -> None:
+    from pcn_anpr.interfaces import OCRResult
+    from pcn_anpr.mock_providers import MockOCRProvider
+    from pcn_anpr.ocr_ensemble import order_variants_for_fast_path, run_multipass_ocr
+    from pcn_anpr.preprocess import generate_ocr_variants
+
+    class ScriptedOCR(MockOCRProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def read(self, plate_crop: object):
+            self.calls += 1
+            return OCRResult(text="MH12AB1234", confidence=0.95, raw_text="MH12AB1234")
+
+    crop = _synthetic_frame(2)[100:130, 80:240]
+    variants = generate_ocr_variants(crop, scales=(2.0, 3.0))
+    ordered = order_variants_for_fast_path(variants)
+    assert ordered[0].name == "gray_clahe_x2"
+    assert {v.name for v in ordered} == {v.name for v in variants}
+
+    # Full multipass (no adaptive): runs every variant that returns text
+    full = ScriptedOCR()
+    ens_full = run_multipass_ocr(crop, full, live_mode=False, scales=(2.0, 3.0))
+    assert full.calls == len(variants)
+    assert ens_full.timing.get("early_exited") is False
+
+    # Adaptive consensus: need two agreeing confident pattern hits before stop
+    fast = ScriptedOCR()
+    ens_fast = run_multipass_ocr(
+        crop,
+        fast,
+        live_mode=False,
+        scales=(2.0, 3.0),
+        adaptive_fast_path=True,
+    )
+    assert fast.calls == 2
+    assert ens_fast.timing.get("early_exited") is True
+    assert ens_fast.timing.get("early_exit_mode") == "consensus"
+    assert ens_fast.normalized_text == "MH12AB1234"
+    assert ens_fast.ocr_confident is True
+
+
+def test_adaptive_fast_path_falls_back_when_not_confident() -> None:
+    from pcn_anpr.interfaces import OCRResult
+    from pcn_anpr.mock_providers import MockOCRProvider
+    from pcn_anpr.ocr_ensemble import run_multipass_ocr
+    from pcn_anpr.preprocess import generate_ocr_variants
+
+    class EventuallyGoodOCR(MockOCRProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def read(self, plate_crop: object):
+            self.calls += 1
+            if self.calls < 3:
+                return OCRResult(text="ZZ99YY11", confidence=0.55, raw_text="ZZ99YY11")
+            return OCRResult(text="KA05MN6789", confidence=0.91, raw_text="KA05MN6789")
+
+    crop = _synthetic_frame(3)[100:130, 80:240]
+    n_variants = len(generate_ocr_variants(crop, scales=(2.0, 3.0)))
+    ocr = EventuallyGoodOCR()
+    ens = run_multipass_ocr(
+        crop,
+        ocr,
+        live_mode=False,
+        scales=(2.0, 3.0),
+        adaptive_fast_path=True,
+        min_ocr_confidence=0.3,
+    )
+    # Two agreeing KA05MN6789 reads required for consensus early-exit
+    assert ocr.calls == 4
+    assert ocr.calls < n_variants
+    assert ens.normalized_text == "KA05MN6789"
+    assert ens.ocr_confident is True
+    assert ens.timing.get("early_exited") is True
+
+
+def test_adaptive_does_not_early_exit_on_conflicting_pattern_reads() -> None:
+    from pcn_anpr.interfaces import OCRResult
+    from pcn_anpr.mock_providers import MockOCRProvider
+    from pcn_anpr.ocr_ensemble import run_multipass_ocr
+
+    class ConflictThenConsensus(MockOCRProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def read(self, plate_crop: object):
+            self.calls += 1
+            # First pass misreads D→Y; later passes agree on correct DV text.
+            if self.calls == 1:
+                return OCRResult(text="MH20DY2366", confidence=0.95, raw_text="MH20DY2366")
+            return OCRResult(text="MH20DV2366", confidence=0.96, raw_text="MH20DV2366")
+
+    crop = _synthetic_frame(4)[100:130, 80:240]
+    ocr = ConflictThenConsensus()
+    ens = run_multipass_ocr(
+        crop,
+        ocr,
+        live_mode=False,
+        scales=(2.0,),
+        adaptive_fast_path=True,
+        min_ocr_confidence=0.3,
+    )
+    # Must not stop at the single DY misread; wait until DV has consensus alone
+    # (conflict clears once only DV remains as the unique pattern cluster with count>=2).
+    # Sequence: DY, DV (conflict), DV (unique=DV, agreeing=2) → exit at call 3
+    assert ocr.calls == 3
+    assert ens.normalized_text == "MH20DV2366"
+    assert ens.ocr_confident is True
+
+
 @pytest.mark.benchmark
 def test_live_inference_benchmark_10_frames() -> None:
     """Report first + post-warmup times on 10 frames with ONE warmed pipeline."""

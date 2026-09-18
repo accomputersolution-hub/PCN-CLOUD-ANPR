@@ -67,6 +67,7 @@ def serialize_event(event: AnprEvent, camera: Camera | None = None, site: Site |
         "sync_status": event.sync_status,
         "classification": event.classification,
         "notes": event.notes,
+        "operator_user_id": getattr(event, "operator_user_id", None),
         "camera_name": camera.name if camera else None,
         "gate_name": gate_name,
         "site_name": site.name if site else None,
@@ -94,6 +95,7 @@ async def ingest_event(
     plate_crop_bytes: bytes | None = None,
     vehicle_crop_bytes: bytes | None = None,
     force: bool = False,
+    operator_user_id: str | None = None,
 ) -> tuple[AnprEvent | None, str]:
     """Create an ANPR event with normalization, confidence, de-dupe, visit matching.
 
@@ -184,6 +186,7 @@ async def ingest_event(
         processing_duration_ms=processing_duration_ms,
         source_type=source_type,
         sync_status=SyncStatus.SYNCED,
+        operator_user_id=operator_user_id,
     )
     db.add(event)
     await db.flush()

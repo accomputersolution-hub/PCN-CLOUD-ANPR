@@ -4,3 +4,5 @@ pytest-asyncio==0.25.0
 # ANPR /test-image fixture + pipeline (also listed in anpr-engine/requirements.txt)
 numpy>=1.24.0
 opencv-python-headless>=4.8.0,<5
+# Editable install so uvicorn finds pcn_anpr without PYTHONPATH
+-e ../anpr-engine

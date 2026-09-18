@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api } from "../../shared/api/client";
+import { ApiError, api } from "../../shared/api/client";
 import type { VehicleDetail, VehicleItem } from "../../shared/api/types";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
@@ -21,8 +21,13 @@ export function VehicleSearchPage() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (q.trim()) navigate(`/vehicles/${q.trim().toUpperCase().replace(/[^A-Z0-9]/g, "")}`);
-    else setTerm(q);
+    const compact = q.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (compact) {
+      setTerm(compact);
+      navigate(`/vehicles/${compact}`);
+    } else {
+      setTerm("");
+    }
   }
 
   return (
@@ -55,10 +60,31 @@ export function VehicleDetailPage() {
     queryKey: ["vehicle", plate],
     queryFn: () => api<VehicleDetail>(`/vehicles/${plate}`),
     enabled: Boolean(plate),
+    retry: (count, err) => {
+      if (err instanceof ApiError && err.status === 404) return false;
+      return count < 1;
+    },
   });
   if (query.isLoading) return <Spinner />;
-  if (query.isError) return <ErrorState message={query.error.message} onRetry={() => void query.refetch()} />;
-  if (!query.data) return <EmptyState title="Vehicle not found" />;
+  if (query.isError) {
+    if (query.error instanceof ApiError && query.error.status === 404) {
+      return (
+        <EmptyState
+          title="Vehicle not found"
+          hint={`No vehicle record for ${plate.toUpperCase()}. Confirm a Manual/Mock ANPR detection first, or check Events for that plate.`}
+        />
+      );
+    }
+    return <ErrorState message={query.error.message} onRetry={() => void query.refetch()} />;
+  }
+  if (!query.data) {
+    return (
+      <EmptyState
+        title="Vehicle not found"
+        hint={`No vehicle record for ${plate.toUpperCase()}. Confirm a Manual/Mock ANPR detection first, or check Events for that plate.`}
+      />
+    );
+  }
   const { vehicle, visits, events } = query.data;
 
   return (

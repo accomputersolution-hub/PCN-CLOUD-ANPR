@@ -381,9 +381,16 @@ async def list_vehicles(ctx: TenantContext, *, q: str | None = None) -> list[Veh
     if not ctx.organization_id and not ctx.is_super:
         return []
     org_id = ctx.organization_id
+    # SUPER_ADMIN with no org: plate search across tenants; bare list stays empty
+    # (avoids unbounded multi-tenant scans).
     if ctx.is_super and not org_id:
-        # Super without org filter: limited empty — require org context for plate search.
-        return []
+        if not q or not str(q).strip():
+            return []
+        compact = normalize_plate(q).normalized
+        if not compact:
+            return []
+        rows = await vehicle_repo().list_by_plate(compact, limit=50)
+        return [v for v in rows if compact in v.plate_normalized]
     assert org_id is not None
     rows = await vehicle_repo().list_for_org(org_id, limit=100)
     if q:
@@ -394,8 +401,9 @@ async def list_vehicles(ctx: TenantContext, *, q: str | None = None) -> list[Veh
 
 async def get_vehicle_by_plate(ctx: TenantContext, plate: str) -> VehicleRecord:
     compact = normalize_plate(plate).normalized
-    if not ctx.organization_id:
+    if not ctx.organization_id and not ctx.is_super:
         raise NotFoundError("Vehicle not found")
+    # SUPER_ADMIN with null organization_id: look up plate across orgs.
     vehicle = await vehicle_repo().get_by_plate(ctx.organization_id, compact)
     if not vehicle:
         raise NotFoundError("Vehicle not found")
@@ -446,6 +454,7 @@ def serialize_event_record(
         "sync_status": event.sync_status,
         "classification": event.classification,
         "notes": event.notes,
+        "operator_user_id": event.operator_user_id,
         "camera_name": camera.name if camera else None,
         "gate_name": gate_name,
         "site_name": site.name if site else None,
@@ -583,6 +592,7 @@ async def ingest_event_fs(
     plate_crop_bytes: bytes | None = None,
     vehicle_crop_bytes: bytes | None = None,
     force: bool = False,
+    operator_user_id: str | None = None,
 ) -> tuple[AnprEventRecord | None, str]:
     """Mirror ingest_event using Firestore repos + object storage for evidence bytes."""
     eid = event_id or str(uuid4())
@@ -670,6 +680,7 @@ async def ingest_event_fs(
         processing_duration_ms=processing_duration_ms,
         source_type=_enum_str(source_type) or str(SourceType.EDGE),
         sync_status=str(SyncStatus.SYNCED),
+        operator_user_id=operator_user_id,
     )
     await _apply_visit_match_fs(event, vehicle)
     await anpr_event_repo().add(event)
@@ -699,10 +710,9 @@ async def list_events(
         ctx.ensure_org(organization_id)
     if site_id:
         ctx.ensure_site(site_id)
+    # Non-super users must be scoped to an organization. Super-admin may list
+    # across tenants (repo applies a hard page limit for cost control).
     if not org_id and not ctx.is_super:
-        return [], 0
-    # Super without org: limited empty list for cost control unless org provided
-    if not org_id:
         return [], 0
 
     fetch = min(page * page_size, 200)
@@ -912,7 +922,9 @@ async def dashboard_summary_fs(
     org_id = ctx.organization_id
     cameras: list[CameraRecord] = []
     events: list[AnprEventRecord] = []
-    if org_id:
+    # Mirror list_cameras / list_events: SUPER_ADMIN with no org still sees a
+    # bounded recent feed so Manual/Mock confirmations appear on the dashboard.
+    if org_id or ctx.is_super:
         cameras = await camera_repo().list_for_tenant(
             organization_id=org_id,
             site_ids=ctx.site_ids or None,

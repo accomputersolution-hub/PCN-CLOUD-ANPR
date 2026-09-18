@@ -56,10 +56,38 @@ export interface EventItem {
   sync_status: string;
   classification: string | null;
   notes: string | null;
+  operator_user_id?: string | null;
   camera_name: string | null;
   gate_name: string | null;
   site_name: string | null;
   duplicate_suppressed?: boolean;
+}
+
+export interface ManualAnprAnalyzeResult {
+  capture_id: string;
+  organization_id: string;
+  site_id: string;
+  camera_id: string;
+  vehicle_detected: boolean;
+  plate_detected: boolean;
+  detected_plate: string;
+  raw_ocr: string;
+  normalized_plate: string;
+  ocr_confidence: number;
+  plate_confidence: number;
+  combined_confidence: number;
+  matches_indian_pattern: boolean;
+  ocr_confident: boolean;
+  processing_ms: number;
+  bbox: number[];
+  plate_crop_jpeg_base64: string | null;
+  error: string | null;
+  event_created: boolean;
+  plate_detector_mode?: string;
+  plate_detector_used?: string;
+  ai_detector_note?: string | null;
+  plate_candidates?: Array<Record<string, unknown>>;
+  selected_bbox?: number[];
 }
 
 export interface Paginated<T> {

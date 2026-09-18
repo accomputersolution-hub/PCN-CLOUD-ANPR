@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Sibling anpr-engine must be importable before Manual ANPR / OCR routes load.
+import app.anpr_path  # noqa: F401
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request

@@ -11,6 +11,7 @@ import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { EventsPage } from "./features/events/EventsPage";
 import { VehicleDetailPage, VehicleSearchPage } from "./features/vehicles/VehiclePages";
+import { ManualAnprPage } from "./features/manual/ManualAnprPage";
 import { MockAnprPage } from "./features/mock/MockAnprPage";
 import { SitesPage } from "./features/sites/SitesPage";
 import { ReportsPage } from "./features/reports/ReportsPage";
@@ -40,6 +41,7 @@ export default function App() {
                   <Route path="/vehicles/:plate" element={<VehicleDetailPage />} />
                   <Route path="/cameras" element={<CamerasPage />} />
                   <Route path="/mock" element={<MockAnprPage />} />
+                  <Route path="/manual-anpr" element={<ManualAnprPage />} />
                   <Route path="/sites" element={<SitesPage />} />
                   <Route path="/connectivity" element={<ConnectivityPage />} />
                   <Route path="/reports" element={<ReportsPage />} />

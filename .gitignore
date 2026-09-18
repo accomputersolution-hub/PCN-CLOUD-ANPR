@@ -59,4 +59,11 @@ coverage/
 # ANPR engine outputs / local samples
 anpr-engine/output/
 anpr-engine/testdata/
+backend/output/
+output/
 edge-agent/data/
+
+*.log
+*.log.err
+uvicorn_restart.log*
+

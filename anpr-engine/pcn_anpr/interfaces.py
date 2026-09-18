@@ -19,12 +19,15 @@ class VehicleDetection:
     bbox: BoundingBox
     label: str = "vehicle"
     confidence: float = 0.0
+    track_id: str | None = None
 
 
 @dataclass
 class PlateDetection:
     bbox: BoundingBox
     confidence: float = 0.0
+    class_name: str = "license_plate"
+    timing_ms: float | None = None
 
 
 @dataclass

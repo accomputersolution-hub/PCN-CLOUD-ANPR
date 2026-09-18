@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -13,9 +13,12 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 const control =
   "w-full min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-accent-500 focus:ring-2";
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={clsx(control, props.className)} />;
-}
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
+  props,
+  ref,
+) {
+  return <input ref={ref} {...props} className={clsx(control, props.className)} />;
+});
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={clsx(control, props.className)} />;

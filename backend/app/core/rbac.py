@@ -33,6 +33,7 @@ class Permission(StrEnum):
     DASHBOARD_READ = "dashboard:read"
     MOCK_WRITE = "mock:write"
     ANPR_TEST = "anpr:test"
+    MANUAL_ANPR = "manual_anpr:write"
     GATEWAY_READ = "gateway:read"
     GATEWAY_WRITE = "gateway:write"
     GATEWAY_PROVISION = "gateway:provision"
@@ -68,6 +69,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.DASHBOARD_READ,
         Permission.MOCK_WRITE,
         Permission.ANPR_TEST,
+        Permission.MANUAL_ANPR,
         Permission.GATEWAY_READ,
         Permission.GATEWAY_WRITE,
         Permission.GATEWAY_PROVISION,
@@ -95,6 +97,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.DASHBOARD_READ,
         Permission.MOCK_WRITE,
         Permission.ANPR_TEST,
+        Permission.MANUAL_ANPR,
         Permission.GATEWAY_READ,
         Permission.GATEWAY_WRITE,
         Permission.GATEWAY_PROVISION,
@@ -110,6 +113,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.VEHICLE_READ,
         Permission.VEHICLE_VISITOR_WRITE,
         Permission.DASHBOARD_READ,
+        Permission.MANUAL_ANPR,
     },
     UserRole.VIEWER: {
         Permission.SITE_READ,

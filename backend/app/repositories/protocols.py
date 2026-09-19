@@ -9,6 +9,7 @@ from app.domain.records import (
     CameraRecord,
     OrganizationRecord,
     SiteRecord,
+    SiteVehicleRegistrationRecord,
     UserProfileRecord,
     VehicleRecord,
 )
@@ -94,6 +95,23 @@ class VehicleRepository(Protocol):
     ) -> VehicleRecord | None: ...
 
 
+class VehicleRegistryRepository(Protocol):
+    async def get(self, registration_id: str) -> SiteVehicleRegistrationRecord | None: ...
+
+    async def get_by_plate(
+        self,
+        *,
+        organization_id: str,
+        site_id: str,
+        plate_normalized: str,
+        active_only: bool = True,
+    ) -> SiteVehicleRegistrationRecord | None: ...
+
+    async def add(self, record: SiteVehicleRegistrationRecord) -> SiteVehicleRegistrationRecord: ...
+
+    async def save(self, record: SiteVehicleRegistrationRecord) -> SiteVehicleRegistrationRecord: ...
+
+
 class AnprEventRepository(Protocol):
     """Event lists MUST use limit/pagination — never unbounded collection scans."""
 
@@ -108,4 +126,4 @@ class AnprEventRepository(Protocol):
         limit: int = 50,
         start_after: datetime | None = None,
     ) -> list[AnprEventRecord]: ...
-
+

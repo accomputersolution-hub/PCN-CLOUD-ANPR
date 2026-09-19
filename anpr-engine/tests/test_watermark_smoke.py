@@ -27,7 +27,7 @@ def test_tn51y6552_alamy_image_prefers_plate() -> None:
     from pcn_anpr.config import ANPRSettings
     from pcn_anpr.factory import build_pipeline
 
-    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv"))
+    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv", vehicle_detector="opencv"))
     result = pipe.process_image(path)
     best = _best(result)
     assert best is not None, f"no plates: {result}"
@@ -52,7 +52,7 @@ def test_mh20dv2366_car_still_reads() -> None:
     from pcn_anpr.config import ANPRSettings
     from pcn_anpr.factory import build_pipeline
 
-    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv"))
+    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv", vehicle_detector="opencv"))
     result = pipe.process_image(path)
     best = _best(result)
     assert best is not None
@@ -68,7 +68,7 @@ def test_mh20dv2366_320x240_still_reads() -> None:
     from pcn_anpr.config import ANPRSettings
     from pcn_anpr.factory import build_pipeline
 
-    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv"))
+    pipe = build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv", vehicle_detector="opencv"))
     result = pipe.process_image(path)
     best = _best(result)
     assert best is not None

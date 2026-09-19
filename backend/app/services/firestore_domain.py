@@ -13,7 +13,9 @@ from zoneinfo import ZoneInfo
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.security import hash_password
 from app.domain.records import (
+    AnprCalibrationRecord,
     AnprEventRecord,
+    AnprRoiRecord,
     CameraRecord,
     EdgeAgentRecord,
     GateRecord,
@@ -245,6 +247,22 @@ def camera_record_to_out(
         "anpr_enabled": camera.anpr_enabled,
         "gateway_id": camera.gateway_id,
         "last_seen": camera.last_seen or camera.last_heartbeat,
+        "anpr_roi": (
+            camera.anpr_roi.model_dump()
+            if getattr(camera, "anpr_roi", None) is not None
+            and hasattr(camera.anpr_roi, "model_dump")
+            else (getattr(camera, "anpr_roi", None) if isinstance(getattr(camera, "anpr_roi", None), dict) else None)
+        ),
+        "anpr_calibration": (
+            camera.anpr_calibration.model_dump()
+            if getattr(camera, "anpr_calibration", None) is not None
+            and hasattr(camera.anpr_calibration, "model_dump")
+            else (
+                getattr(camera, "anpr_calibration", None)
+                if isinstance(getattr(camera, "anpr_calibration", None), dict)
+                else None
+            )
+        ),
     }
 
 
@@ -330,6 +348,11 @@ async def create_camera(ctx: TenantContext, body: Any) -> dict[str, Any]:
         anpr_enabled=body.anpr_enabled,
         resolution=body.resolution or "1920x1080",
         onvif_ip=body.onvif_ip,
+        anpr_roi=(
+            AnprRoiRecord(**body.anpr_roi.model_dump())
+            if getattr(body, "anpr_roi", None) is not None
+            else None
+        ),
         rtsp_url_encrypted=rtsp_enc,
         username_encrypted=user_enc,
         password_encrypted=pass_enc,
@@ -355,6 +378,13 @@ async def update_camera(ctx: TenantContext, camera_id: str, body: Any) -> dict[s
     for key, value in data.items():
         if key in {"direction", "source_type", "stream_type"} and value is not None:
             setattr(camera, key, _enum_str(value))
+        elif key == "anpr_roi":
+            if value is None:
+                camera.anpr_roi = None
+            elif isinstance(value, dict):
+                camera.anpr_roi = AnprRoiRecord(**value)
+            else:
+                camera.anpr_roi = value
         else:
             setattr(camera, key, value)
     saved = await camera_repo().save(camera)
@@ -428,6 +458,7 @@ def serialize_event_record(
     site: SiteRecord | None = None,
     *,
     gate_name: str | None = None,
+    registry_match: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": event.id,
@@ -459,6 +490,7 @@ def serialize_event_record(
         "gate_name": gate_name,
         "site_name": site.name if site else None,
         "duplicate_suppressed": False,
+        "registry_match": registry_match,
     }
 
 
@@ -702,6 +734,8 @@ async def list_events(
     direction: Direction | None = None,
     camera_id: str | None = None,
     gate_id: str | None = None,
+    person_name: str | None = None,
+    flat_room_unit: str | None = None,
     page: int = 1,
     page_size: int = 25,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -732,6 +766,19 @@ async def list_events(
         rows = [e for e in rows if e.camera_id == camera_id]
     if gate_id:
         rows = [e for e in rows if e.gate_id == gate_id]
+    if person_name or flat_room_unit:
+        from app.services import vehicle_registry as reg_svc
+
+        pairs = await reg_svc.plates_matching_registry_filters(
+            db=None,
+            ctx=ctx,
+            person_name=person_name,
+            flat_room_unit=flat_room_unit,
+            site_id=site_id,
+            organization_id=organization_id,
+        )
+        allowed = pairs or set()
+        rows = [e for e in rows if (e.site_id, e.plate_normalized) in allowed]
 
     total = len(rows)
     start = (page - 1) * page_size

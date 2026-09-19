@@ -39,25 +39,32 @@ def refine_loose_plate_crop(
     crop: Any,
     *,
     min_confidence: float = 0.2,
+    plate_detector: Any | None = None,
 ) -> tuple[Any | None, tuple[int, int, int, int] | None, dict[str, Any]]:
     """Return a tighter plate subcrop when the input is a loose vehicle-front view.
 
     Indian front plates sit on the bumper (lower half). Searching the full crop
     first often locks onto the grille chrome and must be avoided.
+
+    Uses the configured ``plate_detector`` when provided (YOLO or OpenCV). Does
+    not secretly construct OpenCV while YOLO plate mode is active.
     """
     meta: dict[str, Any] = {"refined": False, "reason": "not_loose"}
     if not is_loose_vehicle_front_crop(crop):
         return None, None, meta
 
     try:
-        import cv2
+        import cv2  # noqa: F401
     except ImportError:
         return None, None, {**meta, "reason": "no_opencv"}
 
-    from pcn_anpr.opencv_plate import OpenCVPlateDetector
-
     h, w = int(crop.shape[0]), int(crop.shape[1])
-    detector = OpenCVPlateDetector(min_confidence=min_confidence, max_candidates=8)
+    detector = plate_detector
+    if detector is None:
+        from pcn_anpr.opencv_plate import OpenCVPlateDetector
+
+        detector = OpenCVPlateDetector(min_confidence=min_confidence, max_candidates=8)
+    meta["plate_detector"] = type(detector).__name__
 
     # Only search lower bands — grille lives in the upper half of these crops.
     searches: list[tuple[str, float]] = [

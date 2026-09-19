@@ -90,6 +90,15 @@ class VisitStatus(StrEnum):
     MANUALLY_RESOLVED = "MANUALLY_RESOLVED"
 
 
+class VehicleRegistryCategory(StrEnum):
+    """Site vehicle registry categories. Unknown = no active registration row."""
+
+    RESIDENT = "resident"
+    GUEST = "guest"
+    STAFF = "staff"
+    VENDOR = "vendor"
+
+
 class SyncStatus(StrEnum):
     PENDING = "PENDING"
     SYNCED = "SYNCED"
@@ -149,3 +158,6 @@ class AuditAction(StrEnum):
     NVR_UPDATE = "NVR_UPDATE"
     NVR_DELETE = "NVR_DELETE"
     SITE_CONNECTIVITY_UPDATE = "SITE_CONNECTIVITY_UPDATE"
+    VEHICLE_REGISTRY_CREATE = "VEHICLE_REGISTRY_CREATE"
+    VEHICLE_REGISTRY_UPDATE = "VEHICLE_REGISTRY_UPDATE"
+    VEHICLE_REGISTRY_DISABLE = "VEHICLE_REGISTRY_DISABLE"

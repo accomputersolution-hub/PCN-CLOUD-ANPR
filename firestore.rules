@@ -77,6 +77,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /siteVehicleRegistrations/{regId} {
+      allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
+        && siteAllowed(resource.data.site_id);
+      allow write: if false;
+    }
+
     match /vehicleVisits/{visitId} {
       allow read: if (isSuperAdmin() || sameOrg(resource.data.organization_id))
         && siteAllowed(resource.data.site_id);

@@ -18,7 +18,7 @@ def _pipe():
     clear_anpr_settings_cache()
     from pcn_anpr.factory import build_pipeline
 
-    return build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv"))
+    return build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv", vehicle_detector="opencv"))
 
 
 def test_short_ocr_iu_is_non_plate() -> None:
@@ -46,6 +46,24 @@ def test_reject_bright_reflective_lamp() -> None:
 def test_twoline_stitch_mh12_ab5687() -> None:
     assert stitch_plate_fragments("MH 12", "AB 5687") == "MH12AB5687"
     assert matches_indian_plate("MH12AB5687")
+
+
+def test_partial_ocr_does_not_duplicate_into_mh12mh12() -> None:
+    """Wide OCR ``MH12 AB 5687`` after partial ``MH12`` must not become MH12MH12."""
+    from pcn_anpr.normalize import extract_all_indian_plates, normalize_plate, sanitize_plate_text
+
+    assert sanitize_plate_text("MH12 AB 5687") == "MH12AB5687"
+    assert sanitize_plate_text("MH12 MH12 AB 5687") == "MH12AB5687"
+    assert sanitize_plate_text("MH12MH12AB5687") == "MH12AB5687"
+    assert stitch_plate_fragments("MH12", "MH12 AB 5687") == "MH12AB5687"
+    assert stitch_plate_fragments("MH12", "MH12", "AB 5687") == "MH12AB5687"
+    assert normalize_plate("MH12 MH12 AB 5687").normalized == "MH12AB5687"
+    assert matches_indian_plate("MH12MH12") is False
+    assert matches_indian_plate("MH12AB5687") is True
+    assert extract_all_indian_plates("MH12AB5687 MH05EK3142") == [
+        "MH12AB5687",
+        "MH05EK3142",
+    ]
 
 
 def test_best_plate_rejects_iu_false_positive() -> None:

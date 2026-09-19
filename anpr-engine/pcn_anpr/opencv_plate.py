@@ -380,7 +380,17 @@ def _boxes_adjacent(a: PlateDetection, b: PlateDetection) -> bool:
     gap_y = max(ay1, by1) - min(ay2, by2)
     max_w = max(a.bbox.w, b.bbox.w, 1.0)
     max_h = max(a.bbox.h, b.bbox.h, 1.0)
-    return gap_x <= max_w * 0.55 and gap_y <= max_h * 0.55
+    # Keep merges local (two-line / split fragments). Wide multi-car gaps must
+    # NOT form a giant union that OCR's several plates in one crop.
+    if gap_x > max_w * 0.35 or gap_y > max_h * 0.45:
+        return False
+    union_w = max(ax2, bx2) - min(ax1, bx1)
+    union_h = max(ay2, by2) - min(ay1, by1)
+    if union_w > max_w * 2.4 or union_h > max_h * 2.6:
+        return False
+    if union_w * union_h > max(a.bbox.w * a.bbox.h, b.bbox.w * b.bbox.h) * 3.5:
+        return False
+    return True
 
 
 def merge_adjacent_plate_detections(
@@ -438,11 +448,16 @@ def expand_partial_plate_crop(
     grow_right: float = 1.15,
     grow_y: float = 0.35,
     grow_up: float | None = None,
+    clamp_xyxy: tuple[float, float, float, float] | None = None,
 ) -> tuple[Any | None, tuple[int, int, int, int]]:
     """Widen a partial registration crop so neighboring glyphs are included.
 
     For likely bottom-line-only motorcycle crops (wide, short, digit-heavy OCR),
     pass a larger ``grow_up`` so the top line (``MH02G``) is recovered.
+
+    When ``clamp_xyxy`` is set (host vehicle ROI + padding), the expanded box
+    never grows outside that region — prevents full-frame blow-ups from
+    ``opencv_fallback_wide`` crops.
     """
     if frame is None or not hasattr(frame, "shape"):
         return None, (x1, y1, x2, y2)
@@ -453,6 +468,17 @@ def expand_partial_plate_crop(
     nx2 = min(w, int(x2 + bw * grow_right))
     ny1 = max(0, int(y1 - bh * up))
     ny2 = min(h, int(y2 + bh * grow_y))
+    if clamp_xyxy is not None:
+        cx1, cy1, cx2, cy2 = (
+            int(clamp_xyxy[0]),
+            int(clamp_xyxy[1]),
+            int(clamp_xyxy[2]),
+            int(clamp_xyxy[3]),
+        )
+        nx1 = max(nx1, max(0, cx1))
+        ny1 = max(ny1, max(0, cy1))
+        nx2 = min(nx2, min(w, cx2))
+        ny2 = min(ny2, min(h, cy2))
     if (nx2 - nx1) <= (x2 - x1) + 4 and (ny2 - ny1) <= (y2 - y1) + 4:
         return None, (x1, y1, x2, y2)
     if nx2 - nx1 < 60 or ny2 - ny1 < 16:

@@ -51,6 +51,9 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
         ws: true,
+        // ANPR calibrate / Manual ANPR can exceed the default proxy idle limit.
+        timeout: 300_000,
+        proxyTimeout: 300_000,
       },
     },
   },

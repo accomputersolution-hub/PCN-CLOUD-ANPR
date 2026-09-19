@@ -23,6 +23,7 @@ class Permission(StrEnum):
     EVENT_CLASSIFY = "event:classify"
     VEHICLE_READ = "vehicle:read"
     VEHICLE_VISITOR_WRITE = "vehicle:visitor_write"
+    VEHICLE_REGISTRY_WRITE = "vehicle:registry_write"
     VISIT_RESOLVE = "visit:resolve"
     REPORT_READ = "report:read"
     REPORT_EXPORT = "report:export"
@@ -60,6 +61,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.EVENT_CLASSIFY,
         Permission.VEHICLE_READ,
         Permission.VEHICLE_VISITOR_WRITE,
+        Permission.VEHICLE_REGISTRY_WRITE,
         Permission.VISIT_RESOLVE,
         Permission.REPORT_READ,
         Permission.REPORT_EXPORT,
@@ -91,6 +93,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.EVENT_CLASSIFY,
         Permission.VEHICLE_READ,
         Permission.VEHICLE_VISITOR_WRITE,
+        Permission.VEHICLE_REGISTRY_WRITE,
         Permission.VISIT_RESOLVE,
         Permission.REPORT_READ,
         Permission.REPORT_EXPORT,
@@ -112,6 +115,8 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.EVENT_CLASSIFY,
         Permission.VEHICLE_READ,
         Permission.VEHICLE_VISITOR_WRITE,
+        # Guards may create guest registrations only (enforced in service).
+        Permission.VEHICLE_REGISTRY_WRITE,
         Permission.DASHBOARD_READ,
         Permission.MANUAL_ANPR,
     },

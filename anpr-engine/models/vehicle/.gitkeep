@@ -1,0 +1,3 @@
+# Placeholder so the vehicle weights directory exists in git.
+# Official yolov8n.pt is downloaded on first YOLO run (see README.md).
+# Do not commit random .pt files here.

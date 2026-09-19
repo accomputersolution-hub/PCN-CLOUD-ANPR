@@ -47,6 +47,18 @@ def test_indian_validation_multi_state() -> None:
     assert normalize_plate("KA05KP7941").normalized == "KA05KP7941"
     assert normalize_plate("KL03AF786").normalized == "KL03AF786"
     assert normalize_plate("KL03AF786").matches_known_pattern is True
+    # Strict civilian: reject 1-digit RTO garbage (rain/night false positives).
+    assert not matches_indian_plate("MH2F22")
+    assert not matches_indian_plate("MN2F2")
+    assert normalize_plate("MH2F22").matches_known_pattern is False
+    assert normalize_plate("MN2F2").matches_known_pattern is False
+    # Delhi legacy 1-digit RTO still valid.
+    assert matches_indian_plate("DL8CAL0413")
+    # Gate / rain plates with 2-digit RTO.
+    assert matches_indian_plate("MH14KU9726")
+    assert matches_indian_plate("MH12TY8345")
+    assert matches_indian_plate("MH02FE2817")
+    assert matches_indian_plate("MH12AB5687")
 
 def test_bharat_series_and_ind_marker() -> None:
     from pcn_anpr.normalize import is_plate_marker_noise, sanitize_plate_text
@@ -144,10 +156,12 @@ def test_detector_on_synthetic_plate(tmp_path: Path) -> None:
 
     pipe = build_pipeline(ANPRSettings(provider_mode="real", ocr_enabled=False, min_plate_confidence=0.2))
     result = pipe.process_image(path)
-    assert result["error"] is None
+    # OCR is disabled — detection may yield candidate boxes without a readable plate.
+    assert result.get("error") in {None, "no reliable plate detected"}
     # Vehicle fallback or plate candidates — must not crash
     assert "vehicle_detected" in result
     assert "plate_detected" in result
+    assert isinstance(result.get("detections"), list)
 
 
 def test_batch_cli(tmp_path: Path) -> None:

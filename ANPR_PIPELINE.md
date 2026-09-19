@@ -41,12 +41,13 @@ class OCRProvider:
 
 | Component | Implementation | License |
 | --- | --- | --- |
-| Vehicle regions | OpenCV edge/contour heuristics | Apache 2.0 (`opencv-python-headless`) |
+| Vehicle regions (default) | Ultralytics **YOLOv8n** (`yolov8n.pt`) when installed | **AGPL-3.0** — see `anpr-engine/models/README.md` |
+| Vehicle regions (fallback) | OpenCV edge/contour heuristics | Apache 2.0 (`opencv-python-headless`) |
 | Plate regions | OpenCV morphology / aspect-ratio plate proposals | Apache 2.0 |
 | OCR | **PaddleOCR** + PaddlePaddle | **Apache 2.0** |
 | Mock providers | Synthetic boxes + `MH12AB1234` | Project code |
 
-**No AGPL Ultralytics/YOLO dependency is installed by default.** Neural plate detectors may be added later under `ANPR_MODEL_DIR` with an explicit commercial/permissive license — see `anpr-engine/models/README.md`.
+**Ultralytics is optional** (`pip install -r anpr-engine/requirements-yolo.txt`). Default env is `ANPR_VEHICLE_DETECTOR=yolo` with automatic OpenCV fallback if Ultralytics is missing. Plate detection remains OpenCV unless you opt into the AI placeholder. Neural **plate** detectors may be added later under `ANPR_MODEL_DIR` — see `anpr-engine/models/README.md`.
 
 ## Edge Agent live pipeline (Phase 6B)
 

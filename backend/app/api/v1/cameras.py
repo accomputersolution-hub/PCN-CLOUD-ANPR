@@ -199,6 +199,7 @@ async def create_camera(
         channel=body.channel,
         anpr_enabled=body.anpr_enabled,
         gateway_id=body.gateway_id,
+        anpr_roi=(body.anpr_roi.model_dump() if body.anpr_roi is not None else None),
     )
     db.add(camera)
     await db.flush()

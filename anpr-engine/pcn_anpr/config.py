@@ -53,10 +53,18 @@ class ANPRSettings:
     ocr_upscale_3x: bool = True
     ocr_save_debug_crops: bool = True
     ocr_debug_dir: str = "./output/ocr_debug"
-    # Plate detector mode: opencv (default) | ai | compare
+    # Plate detector: opencv (default) | yolo (eval) | hybrid | ai | compare
     plate_detector: str = "opencv"
     # Local weights dir for AI plate detector (never auto-downloaded)
     ai_plate_model_dir: str = ""
+    # Vehicle detector: yolo (preferred) | opencv | mock
+    vehicle_detector: str = "yolo"
+    # Optional explicit YOLO weights path (default: {model_dir}/vehicle/yolov8n.pt)
+    yolo_vehicle_weights: str = ""
+    yolo_vehicle_conf: float = 0.35
+    # Plate YOLO (EVAL): {model_dir}/plate/yolov8n_plate_yasirfaizahmed_best.pt
+    yolo_plate_weights: str = ""
+    yolo_plate_conf: float = 0.25
 
 
 @lru_cache
@@ -65,8 +73,11 @@ def get_anpr_settings() -> ANPRSettings:
     if mode not in {"real", "mock"}:
         mode = "real"
     plate_mode = os.getenv("ANPR_PLATE_DETECTOR", "opencv").strip().lower()
-    if plate_mode not in {"opencv", "ai", "compare"}:
+    if plate_mode not in {"opencv", "yolo", "hybrid", "ai", "compare"}:
         plate_mode = "opencv"
+    vehicle_mode = os.getenv("ANPR_VEHICLE_DETECTOR", "yolo").strip().lower()
+    if vehicle_mode not in {"yolo", "opencv", "mock"}:
+        vehicle_mode = "yolo"
     return ANPRSettings(
         anpr_enabled=_bool("ANPR_ENABLED", True),
         ocr_enabled=_bool("OCR_ENABLED", True),
@@ -85,6 +96,11 @@ def get_anpr_settings() -> ANPRSettings:
         ocr_debug_dir=os.getenv("ANPR_OCR_DEBUG_DIR", "./output/ocr_debug"),
         plate_detector=plate_mode,
         ai_plate_model_dir=os.getenv("ANPR_AI_PLATE_MODEL_DIR", "").strip(),
+        vehicle_detector=vehicle_mode,
+        yolo_vehicle_weights=os.getenv("ANPR_YOLO_VEHICLE_WEIGHTS", "").strip(),
+        yolo_vehicle_conf=_float("ANPR_YOLO_VEHICLE_CONF", 0.35),
+        yolo_plate_weights=os.getenv("ANPR_YOLO_PLATE_WEIGHTS", "").strip(),
+        yolo_plate_conf=_float("ANPR_YOLO_PLATE_CONF", 0.25),
     )
 
 

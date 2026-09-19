@@ -12,6 +12,9 @@ from pcn_anpr.interfaces import (
 
 
 class MockVehicleDetector(VehicleDetector):
+    detector_name = "mock"
+    prefer_detector_hosts = False
+
     def detect(self, frame: object) -> list[VehicleDetection]:
         return [VehicleDetection(bbox=BoundingBox(0.1, 0.2, 0.7, 0.6, 0.88), confidence=0.88)]
 

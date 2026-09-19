@@ -56,6 +56,43 @@ class GateRecord(BaseModel):
     is_active: bool = True
 
 
+class AnprRoiRecord(BaseModel):
+    """Normalized rectangular ANPR zone (0..1 relative to frame). None/disabled = full frame."""
+
+    enabled: bool = True
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 1.0
+    h: float = 1.0
+
+
+class AnprCalibrationSummary(BaseModel):
+    """Compact installer calibration result (no image bytes)."""
+
+    status: str = "RED"
+    overall_score: float = 0.0
+    component_scores: dict[str, Any] = Field(default_factory=dict)
+    reasons: list[str] = Field(default_factory=list)
+    guidance: list[str] = Field(default_factory=list)
+    plate_width_px: float | None = None
+    plate_height_px: float | None = None
+    plate_text: str | None = None
+    ocr_confidence: float | None = None
+    brightness: float | None = None
+    sharpness: float | None = None
+    roi_enabled: bool = False
+    vehicle_in_roi: bool | None = None
+    processing_ms: int = 0
+
+
+class AnprCalibrationRecord(BaseModel):
+    """Latest + previous calibration summaries only (no image history)."""
+
+    updated_at: str
+    latest: AnprCalibrationSummary
+    previous: AnprCalibrationSummary | None = None
+
+
 class CameraRecord(BaseModel):
     id: str
     organization_id: str
@@ -82,6 +119,10 @@ class CameraRecord(BaseModel):
     connection_error: str | None = None
     retry_count: int = 0
     has_credentials: bool = False
+    # Optional gate ANPR zone (normalized rect). Null = ROI disabled (legacy behavior).
+    anpr_roi: AnprRoiRecord | None = None
+    # Installer calibration latest+previous only (no JPEG history).
+    anpr_calibration: AnprCalibrationRecord | None = None
     # Server-only Fernet ciphertext (never returned to clients; rules deny client writes).
     rtsp_url_encrypted: str | None = None
     username_encrypted: str | None = None
@@ -98,6 +139,24 @@ class VehicleRecord(BaseModel):
     currently_inside: bool = False
     visitor_note: str | None = None
     classification: str | None = None
+
+
+class SiteVehicleRegistrationRecord(BaseModel):
+    """Site-scoped vehicle registry entry (Feature 3)."""
+
+    id: str
+    organization_id: str
+    site_id: str
+    plate_normalized: str
+    vehicle_id: str | None = None
+    category: str = "resident"
+    person_name: str = ""
+    mobile_number: str | None = None
+    flat_room_unit: str | None = None
+    notes: str | None = None
+    active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class AnprEventRecord(BaseModel):

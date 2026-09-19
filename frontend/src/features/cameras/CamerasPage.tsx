@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "../../shared/api/client";
 import type { CameraItem, GateItem, GatewayItem, NvrItem, SiteItem } from "../../shared/api/types";
@@ -40,6 +41,7 @@ export function CamerasPage() {
   const { hasRole } = useAuth();
   const canWrite = hasRole("SUPER_ADMIN", "ORG_ADMIN", "SITE_MANAGER");
   const canTest = hasRole("SUPER_ADMIN", "ORG_ADMIN", "SITE_MANAGER");
+  const canCalibrate = hasRole("SUPER_ADMIN", "ORG_ADMIN", "SITE_MANAGER", "SECURITY_GUARD");
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const cameras = useQuery({ queryKey: ["cameras"], queryFn: () => api<CameraItem[]>("/cameras") });
@@ -101,12 +103,42 @@ export function CamerasPage() {
                 <dd>{formatTs(cam.last_frame_at)}</dd>
                 <dt className="text-slate-400">FPS</dt>
                 <dd>{cam.fps != null ? cam.fps.toFixed(1) : "—"}</dd>
+                <dt className="text-slate-400">ANPR Zone</dt>
+                <dd>{cam.anpr_roi?.enabled ? "ON" : "OFF"}</dd>
                 <dt className="text-slate-400">Last error</dt>
                 <dd className={cam.connection_error ? "text-red-600" : ""}>
                   {cam.connection_error || "—"}
                 </dd>
               </dl>
               <div className="mt-4 flex flex-wrap gap-2">
+                {canCalibrate ? (
+                  <Link
+                    to={`/cameras/${cam.id}/calibrate`}
+                    className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Calibrate ANPR
+                  </Link>
+                ) : null}
+                {canWrite && cam.anpr_roi?.enabled ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={async () => {
+                      try {
+                        await api(`/cameras/${cam.id}`, {
+                          method: "PATCH",
+                          body: JSON.stringify({ anpr_roi: null }),
+                        });
+                        toast.success("ANPR Zone cleared");
+                        void queryClient.invalidateQueries({ queryKey: ["cameras"] });
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Clear ROI failed");
+                      }
+                    }}
+                  >
+                    Clear ROI
+                  </Button>
+                ) : null}
                 {canTest ? (
                   <Button
                     type="button"

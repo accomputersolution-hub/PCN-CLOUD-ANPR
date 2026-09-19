@@ -126,10 +126,13 @@ def detect_plates_in_rois(
     max_proposals: int = 10,
     class_prefix: str = "primary_roi",
     diagnostics: dict[str, Any] | None = None,
+    plate_detector: Any | None = None,
 ) -> list[PlateDetection]:
-    """Propose plate boxes inside the given ROI bands (taillight rejection intact)."""
-    from pcn_anpr.opencv_plate import OpenCVPlateDetector
+    """Propose plate boxes inside the given ROI bands (taillight rejection intact).
 
+    Uses the configured ``plate_detector`` when provided. Does **not** secretly
+    construct OpenCV when YOLO plate mode is active — pass the pipeline detector.
+    """
     if diagnostics is not None:
         diagnostics["roi_labels"] = [label for label, *_ in rois]
         diagnostics["roi_count"] = len(rois)
@@ -137,6 +140,7 @@ def detect_plates_in_rois(
             {"label": label, "h": int(roi.shape[0]), "w": int(roi.shape[1]), "ox": ox, "oy": oy}
             for label, roi, ox, oy in rois
         ]
+        diagnostics["plate_detector"] = type(plate_detector).__name__ if plate_detector else "default_opencv"
     if not rois:
         if diagnostics is not None:
             diagnostics["variant_count"] = 0
@@ -144,14 +148,20 @@ def detect_plates_in_rois(
             diagnostics["twoline_candidates"] = 0
         return []
 
-    detector = OpenCVPlateDetector(
-        min_aspect=1.25,
-        max_aspect=6.5,
-        min_area_ratio=0.0006,
-        max_area_ratio=0.35,
-        min_confidence=0.12,
-        max_candidates=8,
-    )
+    detector = plate_detector
+    if detector is None:
+        from pcn_anpr.opencv_plate import OpenCVPlateDetector
+
+        detector = OpenCVPlateDetector(
+            min_aspect=1.25,
+            max_aspect=6.5,
+            min_area_ratio=0.0006,
+            max_area_ratio=0.35,
+            min_confidence=0.12,
+            max_candidates=8,
+        )
+
+    use_variants = type(detector).__name__ == "OpenCVPlateDetector"
 
     fh = int(frame.shape[0])
     fw = int(frame.shape[1])
@@ -159,8 +169,13 @@ def detect_plates_in_rois(
     proposals: list[PlateDetection] = []
 
     for label, roi, ox, oy in rois:
-        scale_back = 1.0
-        for vname, variant in _roi_variants(roi):
+        variants: list[tuple[str, Any]]
+        if use_variants:
+            variants = _roi_variants(roi)
+        else:
+            # Neural plate detectors: run once on the ROI crop (no morph variants).
+            variants = [("original", roi)]
+        for vname, variant in variants:
             if variant.shape[0] != roi.shape[0] or variant.shape[1] != roi.shape[1]:
                 scale_back = roi.shape[1] / max(variant.shape[1], 1)
             else:
@@ -239,6 +254,7 @@ def detect_plates_in_primary_rois(
     primary_idx: int | None,
     max_proposals: int = 10,
     diagnostics: dict[str, Any] | None = None,
+    plate_detector: Any | None = None,
 ) -> list[PlateDetection]:
     """Propose two-line-friendly plate boxes inside primary / center-lower ROIs."""
     rois = build_primary_search_rois(
@@ -250,6 +266,7 @@ def detect_plates_in_primary_rois(
         max_proposals=max_proposals,
         class_prefix="primary_roi",
         diagnostics=diagnostics,
+        plate_detector=plate_detector,
     )
 
 
@@ -260,6 +277,7 @@ def detect_plates_in_vehicle_rois(
     vehicle_index: int,
     max_proposals: int = 6,
     diagnostics: dict[str, Any] | None = None,
+    plate_detector: Any | None = None,
 ) -> list[PlateDetection]:
     """Plate proposals strictly inside one vehicle ROI (never promoted to primary)."""
     rois = build_vehicle_search_rois(
@@ -276,4 +294,5 @@ def detect_plates_in_vehicle_rois(
         max_proposals=max_proposals,
         class_prefix=f"vehicle_roi:{tid}",
         diagnostics=diagnostics,
+        plate_detector=plate_detector,
     )

@@ -19,6 +19,7 @@ from app.models.enums import (
     StreamType,
     SyncStatus,
     UserRole,
+    VehicleRegistryCategory,
     VisitStatus,
     VpnStatus,
 )
@@ -28,6 +29,7 @@ from app.models.nvr import Nvr
 from app.models.organization import Organization
 from app.models.refresh_token import RefreshToken
 from app.models.site import Site, UserSiteAccess
+from app.models.site_vehicle_registration import SiteVehicleRegistration
 from app.models.snapshot import Snapshot
 from app.models.user import User
 from app.models.vehicle import Vehicle
@@ -55,6 +57,7 @@ __all__ = [
     "Organization",
     "RefreshToken",
     "Site",
+    "SiteVehicleRegistration",
     "Snapshot",
     "SnapshotKind",
     "SourceType",
@@ -64,6 +67,7 @@ __all__ = [
     "UserRole",
     "UserSiteAccess",
     "Vehicle",
+    "VehicleRegistryCategory",
     "VehicleVisit",
     "VisitStatus",
     "VpnStatus",

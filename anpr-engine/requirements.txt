@@ -7,3 +7,8 @@ Pillow>=10.0.0
 #   pip install -r requirements-ocr.txt
 # PaddleOCR is Apache 2.0. First run downloads model weights into the paddle hub cache
 # (or under ANPR_MODEL_DIR guidance — see models/README.md).
+
+# Optional YOLO vehicle detector (AGPL-3.0 Ultralytics — not installed by default):
+#   pip install -r requirements-yolo.txt
+# Default ANPR_VEHICLE_DETECTOR=yolo falls back to OpenCV when ultralytics is missing.
+# See models/README.md for yolov8n.pt source + license.

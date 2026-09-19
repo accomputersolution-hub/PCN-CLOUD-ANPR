@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,9 +14,11 @@ from app.core.runtime import is_firestore
 from app.models.anpr_event import AnprEvent
 from app.models.enums import AuditAction, Direction
 from app.models.site import Site
+from app.models.site_vehicle_registration import SiteVehicleRegistration
 from app.schemas.common import PageMeta, Paginated
 from app.schemas.event import EventClassifyRequest, EventCorrectRequest, EventOut
 from app.services import firestore_domain as fs
+from app.services import vehicle_registry as reg_svc
 from app.services.audit import write_audit
 from app.services.event import serialize_event
 from app.services.plate import normalize_plate
@@ -37,6 +39,8 @@ def _filters(
     organization_id: str | None,
     date_from: datetime | None,
     date_to: datetime | None,
+    person_name: str | None = None,
+    flat_room_unit: str | None = None,
 ):
     stmt = ctx.apply_org(stmt, AnprEvent.organization_id)
     stmt = ctx.apply_site(stmt, AnprEvent.site_id)
@@ -59,6 +63,20 @@ def _filters(
         stmt = stmt.where(AnprEvent.timestamp >= date_from)
     if date_to:
         stmt = stmt.where(AnprEvent.timestamp <= date_to)
+    if person_name or flat_room_unit:
+        # Live join — do not denormalize registry onto events
+        stmt = stmt.join(
+            SiteVehicleRegistration,
+            and_(
+                SiteVehicleRegistration.organization_id == AnprEvent.organization_id,
+                SiteVehicleRegistration.site_id == AnprEvent.site_id,
+                SiteVehicleRegistration.plate_normalized == AnprEvent.plate_normalized,
+            ),
+        )
+        if person_name:
+            stmt = stmt.where(SiteVehicleRegistration.person_name.ilike(f"%{person_name.strip()}%"))
+        if flat_room_unit:
+            stmt = stmt.where(SiteVehicleRegistration.flat_room_unit.ilike(f"%{flat_room_unit.strip()}%"))
     return stmt
 
 
@@ -72,6 +90,8 @@ async def list_events(
     organization_id: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    person_name: str | None = None,
+    flat_room_unit: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
     db: AsyncSession | None = Depends(get_db),
@@ -87,9 +107,12 @@ async def list_events(
             direction=direction,
             camera_id=camera_id,
             gate_id=gate_id,
+            person_name=person_name,
+            flat_room_unit=flat_room_unit,
             page=page,
             page_size=page_size,
         )
+        items = await reg_svc.attach_registry_matches_to_event_dicts(db=db, user=ctx.user, items=items)
         return Paginated(
             items=[EventOut.model_validate(i) for i in items],
             meta=PageMeta(total=total, page=page, page_size=page_size),
@@ -108,6 +131,8 @@ async def list_events(
         organization_id=organization_id,
         date_from=date_from,
         date_to=date_to,
+        person_name=person_name,
+        flat_room_unit=flat_room_unit,
     )
     count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
     total = int((await db.execute(count_stmt)).scalar_one())
@@ -119,7 +144,9 @@ async def list_events(
         s.id: s
         for s in (await db.execute(select(Site).where(Site.id.in_(site_ids)))).scalars().all()
     } if site_ids else {}
-    items = [EventOut.model_validate(serialize_event(r, r.camera, sites.get(r.site_id))) for r in rows]
+    raw_items = [serialize_event(r, r.camera, sites.get(r.site_id)) for r in rows]
+    raw_items = await reg_svc.attach_registry_matches_to_event_dicts(db=db, user=ctx.user, items=raw_items)
+    items = [EventOut.model_validate(i) for i in raw_items]
     return Paginated(items=items, meta=PageMeta(total=total, page=page, page_size=page_size))
 
 
@@ -131,7 +158,9 @@ async def get_event(
     _: object = Depends(require_permission(Permission.EVENT_READ)),
 ) -> EventOut:
     if is_firestore():
-        return EventOut.model_validate(await fs.get_event(ctx, event_id))
+        item = await fs.get_event(ctx, event_id)
+        items = await reg_svc.attach_registry_matches_to_event_dicts(db=db, user=ctx.user, items=[item])
+        return EventOut.model_validate(items[0])
     assert db is not None
     stmt = (
         select(AnprEvent)
@@ -144,7 +173,9 @@ async def get_event(
     ctx.ensure_org(event.organization_id)
     ctx.ensure_site(event.site_id)
     site = await db.get(Site, event.site_id)
-    return EventOut.model_validate(serialize_event(event, event.camera, site))
+    raw = serialize_event(event, event.camera, site)
+    raw_items = await reg_svc.attach_registry_matches_to_event_dicts(db=db, user=ctx.user, items=[raw])
+    return EventOut.model_validate(raw_items[0])
 
 
 @router.post("/{event_id}/correct", response_model=EventOut)

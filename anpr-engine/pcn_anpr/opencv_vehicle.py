@@ -13,7 +13,14 @@ from pcn_anpr.interfaces import BoundingBox, VehicleDetection, VehicleDetector
 
 
 class OpenCVVehicleDetector(VehicleDetector):
-    """Propose vehicle-sized regions; always falls back to full-frame if none found."""
+    """Propose vehicle-sized regions; always falls back to full-frame if none found.
+
+    Optional fallback when ``ANPR_VEHICLE_DETECTOR=opencv`` or YOLO is unavailable.
+    """
+
+    detector_name = "opencv"
+    prefer_detector_hosts = False
+    full_frame_fallback = True
 
     def __init__(
         self,
@@ -61,7 +68,7 @@ class OpenCVVehicleDetector(VehicleDetector):
             if aspect < 0.35 or aspect > 4.5:
                 continue
             # Reject near-full-frame noise blobs unless nothing else exists later.
-            if area >= h * w * 0.92:
+            if area >= h * w * 0.55:
                 continue
             conf = min(0.85, 0.30 + area / (h * w))
             # Prefer lower/mid road band (visibility of rears).

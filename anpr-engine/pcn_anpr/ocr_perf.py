@@ -94,13 +94,17 @@ class OcrPerfSession:
             self.duplicate_skips += 1
 
     def stage_call_counts(self) -> dict[str, int]:
-        stage1 = sum(1 for c in self.calls if str(c.stage).startswith("stage1"))
+        stage1 = sum(
+            1
+            for c in self.calls
+            if str(c.stage).startswith("stage1")
+        )
         primary = sum(1 for c in self.calls if str(c.stage).startswith("primary_roi"))
-        secondary = len(self.calls) - stage1 - primary
+        secondary = sum(1 for c in self.calls if str(c.stage).startswith("secondary"))
         return {
             "stage1_calls": stage1,
             "primary_calls": primary,
-            "secondary_calls": max(0, secondary),
+            "secondary_calls": secondary,
             "duplicate_calls": sum(1 for c in self.calls if c.duplicate) + self.duplicate_skips,
             "total_calls": len(self.calls),
         }
@@ -147,9 +151,18 @@ class OcrPerfSession:
     def summary_dict(self) -> dict[str, Any]:
         from pcn_anpr.ocr_ensemble import RESERVED_PRIMARY_OCR_CALLS
 
-        stage1 = [c for c in self.calls if c.stage.startswith("stage1")]
+        stage1 = [
+            c
+            for c in self.calls
+            if c.stage.startswith("stage1") and not c.stage.startswith("stage1_secondary")
+        ]
         roi = [c for c in self.calls if c.stage.startswith("primary_roi")]
-        other = [c for c in self.calls if c not in stage1 and c not in roi]
+        secondary = [
+            c
+            for c in self.calls
+            if c.stage.startswith("secondary") or c.stage.startswith("stage1_secondary")
+        ]
+        other = [c for c in self.calls if c not in stage1 and c not in roi and c not in secondary]
         dup_count = sum(1 for c in self.calls if c.duplicate) + self.duplicate_skips
         return {
             "paddle_calls_total": len(self.calls),
@@ -158,7 +171,7 @@ class OcrPerfSession:
             "primary_roi_calls": len(roi),
             "primary_calls": len(roi),
             "primary_roi_total_ms": round(sum(c.time_ms for c in roi), 2),
-            "secondary_calls": len(other),
+            "secondary_calls": len(secondary),
             "other_calls": len(other),
             "duplicate_calls": dup_count,
             "duplicate_skips": self.duplicate_skips,

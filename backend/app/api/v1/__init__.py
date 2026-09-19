@@ -7,6 +7,7 @@ from app.api.deps import get_current_user
 from app.api.v1 import (
     anpr,
     auth,
+    camera_calibration,
     cameras,
     dashboard,
     edge,
@@ -22,6 +23,7 @@ from app.api.v1 import (
     reports,
     sites,
     users,
+    vehicle_registry,
     vehicles,
     ws,
 )
@@ -33,8 +35,10 @@ api_router.include_router(auth.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(organizations.router)
 api_router.include_router(sites.router)
+api_router.include_router(vehicle_registry.router)
 api_router.include_router(gates.router)
 api_router.include_router(cameras.router)
+api_router.include_router(camera_calibration.router)
 api_router.include_router(gateways.router)
 api_router.include_router(nvrs.router)
 api_router.include_router(events.router)

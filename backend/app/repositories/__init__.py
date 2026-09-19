@@ -91,6 +91,15 @@ def vehicle_repo(db: AsyncSession | None = None):
     )
 
 
+def vehicle_registry_repo(db: AsyncSession | None = None):
+    if _is_firestore():
+        return firestore_store.FirestoreVehicleRegistryRepository()
+    require_sqlalchemy_datastore()
+    raise ValidationAppError(
+        "vehicle_registry_repo is Firestore-backed; use SQLAlchemy SiteVehicleRegistration when DATASTORE_PROVIDER=sqlalchemy",
+    )
+
+
 def anpr_event_repo(db: AsyncSession | None = None):
     if _is_firestore():
         return firestore_store.FirestoreAnprEventRepository()

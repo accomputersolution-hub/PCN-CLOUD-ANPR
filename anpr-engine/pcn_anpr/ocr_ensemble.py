@@ -12,10 +12,13 @@ from typing import Any
 
 from pcn_anpr.interfaces import OCRProvider, OCRResult
 from pcn_anpr.normalize import (
+    is_near_pattern_invalid_state,
     is_non_plate_text,
     is_plate_marker_noise,
     matches_indian_plate,
     normalize_plate,
+    plates_slot_equivalent,
+    reconcile_state_prefix,
     stitch_plate_fragments,
     strip_plate,
 )
@@ -39,6 +42,32 @@ _FAST_PATH_VARIANT_ORDER: tuple[str, ...] = (
     "adaptive_x3",
     "deskew_adaptive_x3",
 )
+
+# Strong early-exit (secondary / multi-vehicle): color/sharpen/adaptive first so a
+# gray_clahe no-pattern fragment (e.g. ``0L413``) cannot starve the good variants.
+_STRONG_PATH_VARIANT_ORDER: tuple[str, ...] = (
+    "color_x2",
+    "sharpen_clahe_x2",
+    "adaptive_x2",
+    "gray_clahe_x2",
+    "deskew_clahe_x2",
+    "persp_clahe_x2",
+    "color_x3",
+    "sharpen_clahe_x3",
+    "adaptive_x3",
+    "gray_clahe_x3",
+    "deskew_clahe_x3",
+    "persp_clahe_x3",
+    "deskew_adaptive_x2",
+    "deskew_adaptive_x3",
+)
+_STRONG_PRIORITY_VARIANTS: tuple[str, ...] = (
+    "color_x2",
+    "sharpen_clahe_x2",
+    "adaptive_x2",
+)
+# Solo high-confidence full-plate exit (no rival pattern) under strong consensus.
+_STRONG_SOLO_MIN_CONFIDENCE = 0.85
 
 
 @dataclass
@@ -118,6 +147,14 @@ def score_candidate(pass_result: OcrPassResult, consistency: int) -> float:
             _prefix, suffix = parts
             # Slight reward for any valid suffix length; no 4-digit mandate.
             score += min(len(suffix), 4) * 2.0
+            # Prefer 3-letter series over digit-bleed truncations (CBD vs CB).
+            import re as _re
+
+            m = _re.match(r"^[A-Z]{2}[0-9]{1,2}([A-Z]{1,3})[0-9]{1,4}$", strip_plate(pass_result.normalized))
+            if m and len(m.group(1)) >= 3:
+                score += 18.0
+            elif m and len(m.group(1)) == 2:
+                score += 4.0
     # Prefer longer plausible reads among non-pattern incomplete OCR only.
     if not pass_result.matches_pattern and not is_non_plate_text(pass_result.normalized):
         score += min(len(pass_result.normalized), 12) * 8.0
@@ -208,6 +245,37 @@ def select_best_pass(passes: list[OcrPassResult], *, min_ocr_confidence: float) 
 
                 best = max(same_prefix, key=_suffix_key)
 
+    # When pattern hits disagree only on digit-suffix glyphs (4↔6 etc.), prefer
+    # higher consistency then confidence — never invent a digit that no pass read.
+    if pattern_passes and best.matches_pattern:
+        best_key = strip_plate(best.normalized)
+        digit_rivals = []
+        for p in pattern_passes:
+            key = strip_plate(p.normalized)
+            if key == best_key:
+                digit_rivals.append(p)
+                continue
+            if len(key) != len(best_key):
+                continue
+            # Same length; only digit slots differ (no letter-slot changes).
+            letter_diff = False
+            digit_diff = False
+            for a, b in zip(best_key, key):
+                if a == b:
+                    continue
+                if a.isdigit() and b.isdigit():
+                    digit_diff = True
+                else:
+                    letter_diff = True
+                    break
+            if not letter_diff and digit_diff:
+                digit_rivals.append(p)
+        if len(digit_rivals) >= 2:
+            def _digit_key(p: OcrPassResult) -> tuple[int, float]:
+                return (counts.get(strip_plate(p.normalized), 0), float(p.confidence))
+
+            best = max(digit_rivals, key=_digit_key)
+
     confident = bool(
         best.matches_pattern
         and best.confidence >= min_ocr_confidence
@@ -233,6 +301,35 @@ def order_variants_for_fast_path(variants: list[PreprocessVariant]) -> list[Prep
     return [v for _, v in indexed]
 
 
+def order_variants_for_strong_path(variants: list[PreprocessVariant]) -> list[PreprocessVariant]:
+    """Strong-mode reorder: color → sharpen → adaptive before CLAHE/deskew/persp."""
+    rank = {name: i for i, name in enumerate(_STRONG_PATH_VARIANT_ORDER)}
+    indexed = list(enumerate(variants))
+    indexed.sort(key=lambda item: (rank.get(item[1].name, 10_000), item[0]))
+    return [v for _, v in indexed]
+
+
+def _slot_aware_pattern_counts(
+    keys: list[str],
+) -> Counter:
+    """Count pattern keys merging slot-aware D/0 B/8 O/0 I/1 S/5 equivalents."""
+    clusters: list[list[str]] = []
+    for key in keys:
+        placed = False
+        for cluster in clusters:
+            if plates_slot_equivalent(key, cluster[0]):
+                cluster.append(key)
+                placed = True
+                break
+        if not placed:
+            clusters.append([key])
+    counts: Counter = Counter()
+    for cluster in clusters:
+        rep = Counter(cluster).most_common(1)[0][0]
+        counts[rep] = len(cluster)
+    return counts
+
+
 def _is_confident_pass(
     *,
     matches_pattern: bool,
@@ -252,6 +349,9 @@ def _is_confident_pass(
 # After this many OCR attempts with zero Indian-pattern hits, abandon the crop
 # under adaptive mode so other plate candidates can be tried cheaply.
 _ADAPTIVE_ABANDON_AFTER_NO_PATTERN = 5
+# Strong path: never abandon before the priority trio (color/sharpen/adaptive);
+# after that, allow a couple more before giving up on empty bumper strips.
+_STRONG_ABANDON_AFTER_NO_PATTERN = 5
 # IND / watermark / English-only crops are dead ends — bail after fewer passes.
 _ADAPTIVE_ABANDON_AFTER_NON_PLATE = 2
 
@@ -262,7 +362,7 @@ MAX_PRIMARY_ROI_OCR_CALLS = RESERVED_PRIMARY_OCR_CALLS
 # Stage-1 (incl. widen/HSRP) hard cap for Manual adaptive — leaves room for primary.
 MAX_STAGE1_OCR_CALLS = 8
 # Background / secondary vehicle OCR after primary is resolved (or failed).
-MAX_SECONDARY_OCR_CALLS = 6
+MAX_SECONDARY_OCR_CALLS = 16
 # Absolute ceiling = primary reserved + stage1 + secondary (+ small slack).
 MAX_PADDLE_CALLS_HARD_CEILING = (
     RESERVED_PRIMARY_OCR_CALLS + MAX_STAGE1_OCR_CALLS + MAX_SECONDARY_OCR_CALLS + 4
@@ -290,7 +390,9 @@ def _try_stitch_full_plate(passes: list[OcrPassResult]) -> OcrPassResult | None:
             compact = strip_plate(p.normalized)
             if compact and matches_indian_plate(compact):
                 texts.append(p.normalized)
-            elif compact and len(compact) <= 8 and " " not in (p.raw_text or ""):
+            elif compact and len(compact) <= 10:
+                # Always keep half-plate / swapped blobs (``MH12``, ``AB5687``,
+                # ``AB5687MH12``) even when raw_text is space-tokenized.
                 texts.append(p.normalized)
     stitched = None
     if token_texts:
@@ -340,6 +442,9 @@ def should_early_exit(
     - ``consensus``: adaptive offline path — require the current best plate text to
       appear on >=2 confident pattern-matching passes so a single high-confidence
       misread (e.g. D→Y) cannot stop the multipass fallback early.
+    - ``strong_consensus``: secondary / multi-vehicle strong path — require either
+      ≥2 slot-aware agreeing strong pattern hits, or one high-confidence full plate
+      with no conflicting pattern rival. Incomplete / no-pattern reads never exit.
     """
     if not passes:
         return False
@@ -369,6 +474,8 @@ def should_early_exit(
             normalized=stitched.normalized,
             min_ocr_confidence=min_ocr_confidence,
         )
+    if mode == "strong_consensus":
+        return _strong_consensus_ready(passes, min_ocr_confidence=min_ocr_confidence)
     if mode != "consensus":
         return False
     interim = select_best_pass(passes, min_ocr_confidence=min_ocr_confidence)
@@ -390,6 +497,77 @@ def should_early_exit(
     return counts[key] > rival_max
 
 
+def _strong_consensus_ready(
+    passes: list[OcrPassResult],
+    *,
+    min_ocr_confidence: float,
+) -> bool:
+    """Strong-mode exit: ≥2 agreeing variants, or one solo high-conf with no rival."""
+    confident = [
+        p
+        for p in passes
+        if p.matches_pattern
+        and float(p.confidence) >= min_ocr_confidence
+        and _plausible_length(p.normalized)
+        and not is_non_plate_text(p.normalized)
+    ]
+    if not confident:
+        # Two-line stitch can still form a full plate from fragments.
+        stitched = _try_stitch_full_plate(passes)
+        if stitched is None:
+            return False
+        return _is_confident_pass(
+            matches_pattern=True,
+            confidence=stitched.confidence,
+            normalized=stitched.normalized,
+            min_ocr_confidence=max(min_ocr_confidence, _STRONG_SOLO_MIN_CONFIDENCE),
+        )
+
+    keys = [strip_plate(p.normalized) for p in confident]
+    counts = _slot_aware_pattern_counts(keys)
+    if not counts:
+        return False
+    best_key, best_n = counts.most_common(1)[0]
+    rival_max = max((c for k, c in counts.items() if not plates_slot_equivalent(k, best_key)), default=0)
+
+    # ≥2 slot-aware agreeing strong variants with clear plurality.
+    if best_n >= 2 and best_n > rival_max:
+        return True
+
+    # One strong high-confidence full Indian plate and no conflicting strong result.
+    if best_n == 1 and rival_max == 0:
+        solo = next(p for p in confident if plates_slot_equivalent(p.normalized, best_key))
+        solo_floor = max(float(min_ocr_confidence), _STRONG_SOLO_MIN_CONFIDENCE)
+        return float(solo.confidence) >= solo_floor and _plausible_length(solo.normalized)
+
+    return False
+
+
+def _strong_sharpen_attempted(
+    *,
+    variants: list[PreprocessVariant],
+    pass_timings: list[dict[str, Any]],
+) -> bool:
+    """True once sharpen_clahe_x2 has run (or was never planned)."""
+    if not any(v.name == "sharpen_clahe_x2" for v in variants):
+        return True
+    return any(t.get("variant") == "sharpen_clahe_x2" for t in pass_timings)
+
+
+def _strong_priority_exhausted(
+    *,
+    variants: list[PreprocessVariant],
+    pass_timings: list[dict[str, Any]],
+) -> bool:
+    """True when color/sharpen/adaptive (if planned) have each been attempted."""
+    planned = {v.name for v in variants}
+    ran = {str(t.get("variant") or "") for t in pass_timings}
+    for name in _STRONG_PRIORITY_VARIANTS:
+        if name in planned and name not in ran:
+            return False
+    return True
+
+
 def run_multipass_ocr(
     plate_crop_bgr: Any,
     ocr: OCRProvider,
@@ -403,17 +581,25 @@ def run_multipass_ocr(
     early_exit_on_confident: bool = False,
     adaptive_fast_path: bool = False,
     aggressive_early_exit: bool = False,
+    strong_early_exit: bool = False,
 ) -> EnsembleOcrResult:
     import time
 
     from pcn_anpr.preprocess import generate_live_ocr_variants, generate_ocr_variants
 
     t_prep0 = time.perf_counter()
+    # Multi-vehicle stage1/secondary: x2 only — x3 doubles planned variants with
+    # little gain once strong_early_exit stops on early consensus.
+    use_scales = scales
+    if strong_early_exit and not live_mode and not aggressive_early_exit:
+        use_scales = tuple(s for s in scales if float(s) <= 2.0) or (2.0,)
     if live_mode:
         variants = generate_live_ocr_variants(plate_crop_bgr)
     else:
-        variants = generate_ocr_variants(plate_crop_bgr, scales=scales)
-        if adaptive_fast_path:
+        variants = generate_ocr_variants(plate_crop_bgr, scales=use_scales)
+        if strong_early_exit and not aggressive_early_exit:
+            variants = order_variants_for_strong_path(variants)
+        elif adaptive_fast_path:
             variants = order_variants_for_fast_path(variants)
     if not variants and plate_crop_bgr is not None:
         variants = [PreprocessVariant("raw", plate_crop_bgr)]
@@ -427,9 +613,13 @@ def run_multipass_ocr(
         debug_paths = save_debug_crops(variants, debug_dir, debug_prefix)
     debug_crops_ms = (time.perf_counter() - t_debug0) * 1000.0 if debug_dir else 0.0
 
-    # Primary-ROI Manual ANPR: stop on first full confident Indian plate (or stitch).
+    # Primary-ROI Manual ANPR (aggressive): stop on first full confident Indian plate.
+    # strong_early_exit alone: strong_consensus (multi-variant agreement / solo high-conf).
+    # Stage-1 keeps adaptive consensus via strong_early_exit=False.
     if aggressive_early_exit:
         exit_mode = "full_plate"
+    elif strong_early_exit:
+        exit_mode = "strong_consensus"
     elif adaptive_fast_path and not live_mode:
         exit_mode = "consensus"
     elif early_exit_on_confident or adaptive_fast_path:
@@ -623,31 +813,61 @@ def run_multipass_ocr(
                     }
                 )
                 # Two-line fragments → promote stitched full plate into the pass list.
-                if exit_mode == "full_plate" and not (
+                if exit_mode in ("full_plate", "strong_consensus") and not (
                     norm.matches_known_pattern and _plausible_length(norm.normalized)
                 ):
                     stitched_pass = _try_stitch_full_plate(passes)
-                    if stitched_pass is not None and _is_confident_pass(
-                        matches_pattern=True,
-                        confidence=stitched_pass.confidence,
-                        normalized=stitched_pass.normalized,
-                        min_ocr_confidence=min_ocr_confidence,
+                    stitch_floor = (
+                        max(min_ocr_confidence, _STRONG_SOLO_MIN_CONFIDENCE)
+                        if exit_mode == "strong_consensus"
+                        else min_ocr_confidence
+                    )
+                    already_full = any(
+                        p.matches_pattern and _plausible_length(p.normalized)
+                        for p in passes
+                    )
+                    if (
+                        stitched_pass is not None
+                        and not already_full
+                        and _is_confident_pass(
+                            matches_pattern=True,
+                            confidence=stitched_pass.confidence,
+                            normalized=stitched_pass.normalized,
+                            min_ocr_confidence=stitch_floor,
+                        )
                     ):
-                        passes.append(stitched_pass)
-                        early_exited = True
-                        early_exit_reason = "full_plate_stitched"
-                        abandon_reason = None
-                        break
-                if exit_mode != "none" and should_early_exit(
+                        # Strong mode: still require sharpen before locking a stitch.
+                        if exit_mode != "strong_consensus" or _strong_sharpen_attempted(
+                            variants=variants, pass_timings=pass_timings
+                        ):
+                            passes.append(stitched_pass)
+                            early_exited = True
+                            early_exit_reason = "full_plate_stitched"
+                            abandon_reason = None
+                            break
+                can_exit = exit_mode != "none" and should_early_exit(
                     passes,
                     min_ocr_confidence=min_ocr_confidence,
                     mode=exit_mode,
+                )
+                if (
+                    can_exit
+                    and exit_mode == "strong_consensus"
+                    and not _strong_sharpen_attempted(
+                        variants=variants, pass_timings=pass_timings
+                    )
                 ):
+                    can_exit = False
+                if can_exit:
                     early_exited = True
                     early_exit_reason = (
                         "full_plate_confident"
                         if exit_mode == "full_plate"
-                        else f"early_exit_{exit_mode}"
+                        else (
+                            "strong_consensus"
+                            if exit_mode == "strong_consensus"
+                            else f"early_exit_{exit_mode}"
+                        )
                     )
                     break
                 # Full-plate mode: state+RTO-only (MH12) is a PARTIAL — stop more
@@ -666,44 +886,108 @@ def run_multipass_ocr(
                         abandon_reason = None
                         break
 
+            # Empty OCR after a strong-mode consensus candidate: still allow exit
+            # once sharpen_clahe_x2 has been attempted (may itself be empty).
+            if (
+                not raw
+                and exit_mode == "strong_consensus"
+                and _strong_sharpen_attempted(variants=variants, pass_timings=pass_timings)
+                and should_early_exit(
+                    passes,
+                    min_ocr_confidence=min_ocr_confidence,
+                    mode=exit_mode,
+                )
+            ):
+                early_exited = True
+                early_exit_reason = "strong_consensus"
+                break
+
+        abandon_after = (
+            _STRONG_ABANDON_AFTER_NO_PATTERN
+            if strong_early_exit
+            else _ADAPTIVE_ABANDON_AFTER_NO_PATTERN
+        )
+        # Strong mode: never abandon before color/sharpen/adaptive have each run.
+        strong_ready_to_abandon = (not strong_early_exit) or _strong_priority_exhausted(
+            variants=variants, pass_timings=pass_timings
+        )
         if (
-            adaptive_fast_path
+            (adaptive_fast_path or strong_early_exit)
             and not live_mode
-            and len(pass_timings) >= _ADAPTIVE_ABANDON_AFTER_NO_PATTERN
+            and strong_ready_to_abandon
+            and len(pass_timings) >= abandon_after
             and not any(p.matches_pattern for p in passes)
         ):
+            # Targeted state-prefix reconcile (HH12VF8354→MH12VF8354) before
+            # abandoning / burning more expensive variants.
+            rescued = False
+            for p in passes:
+                src = p.normalized or p.raw_text or ""
+                if not is_near_pattern_invalid_state(src):
+                    continue
+                fixed = reconcile_state_prefix(src)
+                if not fixed or not matches_indian_plate(fixed):
+                    continue
+                passes.append(
+                    OcrPassResult(
+                        variant=f"{p.variant}+state_prefix",
+                        raw_text=p.raw_text,
+                        normalized=fixed,
+                        confidence=float(p.confidence),
+                        matches_pattern=True,
+                        elapsed_ms=0.0,
+                    )
+                )
+                rescued = True
+                break
+            if rescued:
+                early_exited = True
+                early_exit_reason = "state_prefix_reconciled"
+                abandon_reason = None
+                break
             # Wrong plate crop / no usable text — skip remaining expensive variants.
             early_exited = True
             abandon_reason = "abandoned_no_pattern"
             early_exit_reason = abandon_reason
             break
         if (
-            adaptive_fast_path
+            (adaptive_fast_path or strong_early_exit)
             and not live_mode
             and len(passes) >= _ADAPTIVE_ABANDON_AFTER_NON_PLATE
             and passes
             and all(is_non_plate_text(p.normalized) for p in passes)
             and not any(p.matches_pattern for p in passes)
         ):
-            early_exited = True
-            abandon_reason = "abandoned_non_plate_text"
-            early_exit_reason = abandon_reason
-            break
+            # Strong: still finish the priority trio before treating as non-plate.
+            if strong_early_exit and not _strong_priority_exhausted(
+                variants=variants, pass_timings=pass_timings
+            ):
+                pass
+            else:
+                early_exited = True
+                abandon_reason = "abandoned_non_plate_text"
+                early_exit_reason = abandon_reason
+                break
 
     ensemble = select_best_pass(passes, min_ocr_confidence=min_ocr_confidence)
     # If stitch created a full plate but select_best didn't pick it as confident,
     # prefer the stitched synthetic pass when present.
     if (
-        exit_mode == "full_plate"
+        exit_mode in ("full_plate", "strong_consensus")
         and not ensemble.ocr_confident
         and any(p.variant == "stitched_twoline" for p in passes)
     ):
         stitch_pass = next(p for p in passes if p.variant == "stitched_twoline")
+        stitch_floor = (
+            max(min_ocr_confidence, _STRONG_SOLO_MIN_CONFIDENCE)
+            if exit_mode == "strong_consensus"
+            else min_ocr_confidence
+        )
         if _is_confident_pass(
             matches_pattern=True,
             confidence=stitch_pass.confidence,
             normalized=stitch_pass.normalized,
-            min_ocr_confidence=min_ocr_confidence,
+            min_ocr_confidence=stitch_floor,
         ):
             ensemble = EnsembleOcrResult(
                 raw_text=stitch_pass.raw_text,
@@ -727,6 +1011,7 @@ def run_multipass_ocr(
         "abandon_reason": abandon_reason,
         "adaptive_fast_path": adaptive_fast_path,
         "aggressive_early_exit": aggressive_early_exit,
+        "strong_early_exit": strong_early_exit,
         "pass_timings": pass_timings,
     }
     ocr_perf.note_ensemble_stats(

@@ -57,6 +57,8 @@ def camera_to_out(camera: Camera) -> dict:
         "anpr_enabled": bool(getattr(camera, "anpr_enabled", True)),
         "gateway_id": getattr(camera, "gateway_id", None),
         "last_seen": getattr(camera, "last_seen", None) or camera.last_heartbeat,
+        "anpr_roi": getattr(camera, "anpr_roi", None),
+        "anpr_calibration": getattr(camera, "anpr_calibration", None),
     }
 
 

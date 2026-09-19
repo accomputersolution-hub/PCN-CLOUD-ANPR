@@ -36,6 +36,7 @@ class EventOut(ORMModel):
     gate_name: str | None = None
     site_name: str | None = None
     duplicate_suppressed: bool = False
+    registry_match: dict | None = None
 
 
 class EventCorrectRequest(ORMModel):

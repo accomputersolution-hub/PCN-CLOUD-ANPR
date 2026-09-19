@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import CameraSourceType, CameraStatus, Direction, StreamType
@@ -48,6 +50,12 @@ class Camera(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     anpr_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     gateway_id: Mapped[str | None] = mapped_column(ForeignKey("gateways.id"), nullable=True, index=True)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Normalized ANPR zone {enabled,x,y,w,h}; null = disabled (legacy full-frame).
+    anpr_roi: Mapped[dict | None] = mapped_column(JSON().with_variant(SQLiteJSON(), "sqlite"), nullable=True)
+    # Installer calibration {updated_at, latest, previous}; null = never calibrated.
+    anpr_calibration: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(SQLiteJSON(), "sqlite"), nullable=True
+    )
 
     organization: Mapped[Organization] = relationship()
     site: Mapped[Site] = relationship(back_populates="cameras")

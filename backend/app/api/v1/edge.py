@@ -113,6 +113,7 @@ async def list_edge_cameras(
                     streaming=bool(cam.streaming),
                     frame_interval=0.5,
                     rtsp_url=url or "",
+                    anpr_roi=getattr(cam, "anpr_roi", None),
                 )
             )
         return out
@@ -135,6 +136,7 @@ async def list_edge_cameras(
                 streaming=bool(cam.streaming),
                 frame_interval=0.5,
                 rtsp_url=url or "",
+                anpr_roi=getattr(cam, "anpr_roi", None),
             )
         )
     return out

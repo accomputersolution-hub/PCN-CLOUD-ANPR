@@ -22,6 +22,7 @@ from app.domain.records import (
     OrganizationRecord,
     RefreshTokenRecord,
     SiteRecord,
+    SiteVehicleRegistrationRecord,
     UserProfileRecord,
     VehicleRecord,
     VisitRecord,
@@ -512,6 +513,101 @@ class FirestoreVehicleRepository:
         return record
 
     async def save(self, record: VehicleRecord) -> VehicleRecord:
+        return await self.add(record)
+
+
+class FirestoreVehicleRegistryRepository:
+    """Site-scoped vehicle registry (Feature 3). Collection: siteVehicleRegistrations."""
+
+    COLLECTION = "siteVehicleRegistrations"
+
+    async def get(self, registration_id: str) -> SiteVehicleRegistrationRecord | None:
+        db = _ensure_ready("vehicle registry")
+        data = await _to_thread(_get_doc, db, self.COLLECTION, registration_id)
+        return SiteVehicleRegistrationRecord.model_validate(data) if data else None
+
+    async def get_by_plate(
+        self,
+        *,
+        organization_id: str,
+        site_id: str,
+        plate_normalized: str,
+        active_only: bool = True,
+    ) -> SiteVehicleRegistrationRecord | None:
+        db = _ensure_ready("vehicle registry")
+
+        def _find() -> dict[str, Any] | None:
+            q = (
+                db.collection(self.COLLECTION)
+                .where("organization_id", "==", organization_id)
+                .where("site_id", "==", site_id)
+                .where("plate_normalized", "==", plate_normalized)
+                .limit(5)
+            )
+            for snap in q.stream():
+                data = snap.to_dict() or {}
+                data["id"] = snap.id
+                if active_only and not bool(data.get("active", True)):
+                    continue
+                return data
+            return None
+
+        data = await _to_thread(_find)
+        return SiteVehicleRegistrationRecord.model_validate(data) if data else None
+
+    async def list_for_site(
+        self,
+        *,
+        organization_id: str,
+        site_id: str,
+        q: str | None = None,
+        plate: str | None = None,
+        name: str | None = None,
+        flat_room_unit: str | None = None,
+        category: str | None = None,
+        active: bool | None = None,
+        limit: int = 200,
+    ) -> list[SiteVehicleRegistrationRecord]:
+        db = _ensure_ready("vehicle registry")
+        rows = await _to_thread(
+            _query_org,
+            db,
+            self.COLLECTION,
+            organization_id=organization_id,
+            site_id=site_id,
+            limit=limit,
+            order_by=None,
+        )
+        out: list[SiteVehicleRegistrationRecord] = []
+        q_norm = (q or "").upper().replace(" ", "")
+        plate_norm = (plate or "").upper().replace(" ", "")
+        name_l = (name or "").strip().lower()
+        flat_l = (flat_room_unit or "").strip().lower()
+        for r in rows:
+            if active is not None and bool(r.get("active", True)) != active:
+                continue
+            if category and str(r.get("category")) != category:
+                continue
+            pn = str(r.get("plate_normalized") or "")
+            if plate_norm and plate_norm not in pn:
+                continue
+            if name_l and name_l not in str(r.get("person_name") or "").lower():
+                continue
+            if flat_l and flat_l not in str(r.get("flat_room_unit") or "").lower():
+                continue
+            if q_norm:
+                hay = f"{pn}{r.get('person_name') or ''}{r.get('flat_room_unit') or ''}".upper()
+                if q_norm not in hay.replace(" ", ""):
+                    continue
+            out.append(SiteVehicleRegistrationRecord.model_validate(r))
+        return out
+
+    async def add(self, record: SiteVehicleRegistrationRecord) -> SiteVehicleRegistrationRecord:
+        db = _ensure_ready("vehicle registry")
+        await _to_thread(_set_doc, db, self.COLLECTION, record.id, _dump(record))
+        return record
+
+    async def save(self, record: SiteVehicleRegistrationRecord) -> SiteVehicleRegistrationRecord:
         return await self.add(record)
 
 

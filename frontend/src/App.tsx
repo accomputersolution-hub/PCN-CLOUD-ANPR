@@ -9,6 +9,7 @@ import { AuthLayout } from "./layouts/AuthLayout";
 import { LoginPage } from "./features/auth/LoginPage";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
+import { AnprCalibrationWizard } from "./features/cameras/AnprCalibrationWizard";
 import { EventsPage } from "./features/events/EventsPage";
 import { VehicleDetailPage, VehicleSearchPage } from "./features/vehicles/VehiclePages";
 import { ManualAnprPage } from "./features/manual/ManualAnprPage";
@@ -40,6 +41,7 @@ export default function App() {
                   <Route path="/vehicles" element={<VehicleSearchPage />} />
                   <Route path="/vehicles/:plate" element={<VehicleDetailPage />} />
                   <Route path="/cameras" element={<CamerasPage />} />
+                  <Route path="/cameras/:cameraId/calibrate" element={<AnprCalibrationWizard />} />
                   <Route path="/mock" element={<MockAnprPage />} />
                   <Route path="/manual-anpr" element={<ManualAnprPage />} />
                   <Route path="/sites" element={<SitesPage />} />

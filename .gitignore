@@ -59,6 +59,11 @@ coverage/
 # ANPR engine outputs / local samples
 anpr-engine/output/
 anpr-engine/testdata/
+# Official YOLO weights are downloaded locally (do not commit large .pt files)
+anpr-engine/models/vehicle/*.pt
+anpr-engine/models/plate/*.pt
+backend/models/**/*.pt
+models/**/*.pt
 backend/output/
 output/
 edge-agent/data/

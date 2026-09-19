@@ -21,7 +21,11 @@ def _pipe():
     clear_anpr_settings_cache()
     from pcn_anpr.factory import build_pipeline
 
-    return build_pipeline(ANPRSettings(provider_mode="real", plate_detector="opencv"))
+    # Fixture OCR regressions pin OpenCV vehicle proposals so YOLO class boxes
+    # do not shift plate crops. Production default remains ANPR_VEHICLE_DETECTOR=yolo.
+    return build_pipeline(
+        ANPRSettings(provider_mode="real", plate_detector="opencv", vehicle_detector="opencv")
+    )
 
 
 def test_primary_vehicle_prefers_center_larger() -> None:
@@ -112,6 +116,12 @@ def test_a_multi_vehicle_prefers_center_motorcycle() -> None:
         # If primary has a pattern plate, it must be MH12 not MH14.
         if primary_rows[0].get("matches_pattern"):
             assert primary_rows[0].get("best_plate") == "MH12AB5687"
+    detections = result.get("detections") or []
+    assert isinstance(detections, list)
+    # Primary plate must appear in the multi-detection list when recovered.
+    plates_found = {d.get("plate") for d in detections}
+    if best.get("normalized_text") == "MH12AB5687":
+        assert "MH12AB5687" in plates_found
 
 
 def test_b_mh12_oblique_car() -> None:

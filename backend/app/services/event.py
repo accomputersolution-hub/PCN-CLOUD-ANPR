@@ -36,7 +36,13 @@ def _loaded_attr(obj: object, name: str) -> Any | None:
     return getattr(obj, name, None)
 
 
-def serialize_event(event: AnprEvent, camera: Camera | None = None, site: Site | None = None) -> dict[str, Any]:
+def serialize_event(
+    event: AnprEvent,
+    camera: Camera | None = None,
+    site: Site | None = None,
+    *,
+    registry_match: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     gate_name = None
     if camera is not None:
         gate = _loaded_attr(camera, "gate")
@@ -72,6 +78,7 @@ def serialize_event(event: AnprEvent, camera: Camera | None = None, site: Site |
         "gate_name": gate_name,
         "site_name": site.name if site else None,
         "duplicate_suppressed": False,
+        "registry_match": registry_match,
     }
 
 

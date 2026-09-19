@@ -1,9 +1,26 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.models.enums import CameraSourceType, CameraStatus, Direction, StreamType
 from app.schemas.common import ORMModel
+
+
+class AnprRoi(ORMModel):
+    """Normalized rectangular ANPR zone (0..1). ``enabled=False`` or omit = full frame."""
+
+    enabled: bool = True
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    w: float = Field(gt=0.0, le=1.0)
+    h: float = Field(gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _bounds(self) -> "AnprRoi":
+        if self.x + self.w > 1.0001 or self.y + self.h > 1.0001:
+            raise ValueError("anpr_roi must fit within the unit square")
+        return self
 
 
 class CameraCreate(ORMModel):
@@ -24,6 +41,7 @@ class CameraCreate(ORMModel):
     channel: str | None = None
     anpr_enabled: bool = True
     gateway_id: str | None = None
+    anpr_roi: AnprRoi | None = None
 
 
 class CameraUpdate(ORMModel):
@@ -43,6 +61,8 @@ class CameraUpdate(ORMModel):
     channel: str | None = None
     anpr_enabled: bool | None = None
     gateway_id: str | None = None
+    # Explicit null clears ROI (ROI disabled).
+    anpr_roi: AnprRoi | None = None
 
 
 class CameraOut(ORMModel):
@@ -74,6 +94,8 @@ class CameraOut(ORMModel):
     anpr_enabled: bool = True
     gateway_id: str | None = None
     last_seen: datetime | None = None
+    anpr_roi: AnprRoi | None = None
+    anpr_calibration: dict[str, Any] | None = None
 
 
 class CameraTestRequest(ORMModel):
@@ -134,4 +156,44 @@ class EdgeCameraConfigOut(ORMModel):
     streaming: bool
     frame_interval: float = 0.5
     rtsp_url: str
+    anpr_roi: AnprRoi | None = None
     # Never include a separate password field — credentials are embedded in rtsp_url if needed.
+
+
+class CalibrationSummaryOut(ORMModel):
+    status: str
+    overall_score: float = 0.0
+    component_scores: dict[str, float] = Field(default_factory=dict)
+    reasons: list[str] = Field(default_factory=list)
+    guidance: list[str] = Field(default_factory=list)
+    plate_width_px: float | None = None
+    plate_height_px: float | None = None
+    plate_text: str | None = None
+    ocr_confidence: float | None = None
+    brightness: float | None = None
+    sharpness: float | None = None
+    roi_enabled: bool = False
+    vehicle_in_roi: bool | None = None
+    processing_ms: int = 0
+
+
+class AnprCalibrationStoredOut(ORMModel):
+    updated_at: str
+    latest: CalibrationSummaryOut
+    previous: CalibrationSummaryOut | None = None
+
+
+class CameraCalibrateResponse(ORMModel):
+    """Full calibration report from a test-frame upload (no event created)."""
+
+    camera_id: str
+    status: str
+    overall_score: float = 0.0
+    component_scores: dict[str, float] = Field(default_factory=dict)
+    reasons: list[str] = Field(default_factory=list)
+    guidance: list[str] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    targets: dict[str, Any] = Field(default_factory=dict)
+    overlays: dict[str, Any] = Field(default_factory=dict)
+    anpr_calibration: AnprCalibrationStoredOut
+    previous: CalibrationSummaryOut | None = None

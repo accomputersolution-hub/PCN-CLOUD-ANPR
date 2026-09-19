@@ -13,6 +13,22 @@ export type VisitStatus =
   | "EXIT_WITHOUT_MATCH"
   | "MANUALLY_RESOLVED";
 
+export type VehicleRegistryCategory = "resident" | "guest" | "staff" | "vendor";
+
+export interface RegistryMatch {
+  known: boolean;
+  status: VehicleRegistryCategory | "unknown" | string;
+  /** Events display: active | inactive | unknown (live resolve, not stored on event). */
+  registry_status?: "active" | "inactive" | "unknown" | string;
+  plate_normalized: string;
+  person_name?: string | null;
+  flat_room_unit?: string | null;
+  mobile_number?: string | null;
+  registration_id?: string | null;
+  active?: boolean | null;
+  category?: string | null;
+}
+
 export interface UserPublic {
   id: string;
   email: string;
@@ -61,6 +77,32 @@ export interface EventItem {
   gate_name: string | null;
   site_name: string | null;
   duplicate_suppressed?: boolean;
+  registry_match?: RegistryMatch | null;
+}
+
+export interface ManualAnprDetection {
+  vehicle_id?: number | string | null;
+  track_id?: string | null;
+  vehicle_bbox?: number[];
+  plate_bbox?: number[];
+  plate: string;
+  raw_ocr?: string;
+  ocr_confidence: number;
+  plate_confidence: number;
+  confidence?: number;
+  combined_confidence: number;
+  is_primary?: boolean;
+  matches_indian_pattern?: boolean;
+  /** Per-detection plate crop; preferred over top-level primary crop for preview. */
+  plate_crop_jpeg_base64?: string | null;
+}
+
+export interface AnprRoi {
+  enabled: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface ManualAnprAnalyzeResult {
@@ -88,6 +130,32 @@ export interface ManualAnprAnalyzeResult {
   ai_detector_note?: string | null;
   plate_candidates?: Array<Record<string, unknown>>;
   selected_bbox?: number[];
+  detections?: ManualAnprDetection[];
+  detection_count?: number;
+  vehicle_results?: Array<Record<string, unknown>>;
+  anpr_debug?: Record<string, unknown>;
+  anpr_roi_enabled?: boolean;
+  anpr_roi?: AnprRoi | null;
+  roi_vehicles?: number | null;
+  ignored_outside_roi?: number | null;
+  total_yolo_vehicles?: number | null;
+  registry_match?: RegistryMatch | null;
+}
+
+export interface VehicleRegistryItem {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  plate_normalized: string;
+  vehicle_id?: string | null;
+  category: VehicleRegistryCategory | string;
+  person_name?: string | null;
+  mobile_number?: string | null;
+  flat_room_unit?: string | null;
+  notes?: string | null;
+  active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface Paginated<T> {
@@ -136,6 +204,49 @@ export interface CameraItem {
   anpr_enabled?: boolean;
   gateway_id?: string | null;
   last_seen?: string | null;
+  anpr_roi?: AnprRoi | null;
+  anpr_calibration?: AnprCalibrationStored | null;
+}
+
+export interface CalibrationSummary {
+  status: "GREEN" | "YELLOW" | "RED" | string;
+  overall_score: number;
+  component_scores: Record<string, number>;
+  reasons: string[];
+  guidance: string[];
+  plate_width_px?: number | null;
+  plate_height_px?: number | null;
+  plate_text?: string | null;
+  ocr_confidence?: number | null;
+  brightness?: number | null;
+  sharpness?: number | null;
+  roi_enabled?: boolean;
+  vehicle_in_roi?: boolean | null;
+  processing_ms?: number;
+}
+
+export interface AnprCalibrationStored {
+  updated_at: string;
+  latest: CalibrationSummary;
+  previous: CalibrationSummary | null;
+}
+
+export interface CameraCalibrateResult {
+  camera_id: string;
+  status: string;
+  overall_score: number;
+  component_scores: Record<string, number>;
+  reasons: string[];
+  guidance: string[];
+  metrics: Record<string, unknown>;
+  targets: Record<string, unknown>;
+  overlays: {
+    vehicle_bbox?: number[];
+    plate_bbox?: number[];
+    roi?: AnprRoi | null;
+  };
+  anpr_calibration: AnprCalibrationStored;
+  previous: CalibrationSummary | null;
 }
 
 export interface SiteItem {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -19,11 +21,28 @@ from app.repositories import camera_repo, site_repo
 from app.schemas.event import EventOut
 from app.services import firestore_domain as fs
 from app.services import manual_anpr as svc
+from app.services import vehicle_registry as reg_svc
 from app.services.audit import write_audit
 from app.services.event import ingest_event, serialize_event
 from app.services.tenant import TenantContext
 
 router = APIRouter(prefix="/manual-anpr", tags=["manual-anpr"])
+
+
+class ManualAnprDetection(BaseModel):
+    vehicle_id: int | str | None = None
+    track_id: str | None = None
+    vehicle_bbox: list[float] = Field(default_factory=list)
+    plate_bbox: list[float] = Field(default_factory=list)
+    plate: str = ""
+    raw_ocr: str = ""
+    ocr_confidence: float = 0.0
+    plate_confidence: float = 0.0
+    confidence: float = 0.0
+    combined_confidence: float = 0.0
+    is_primary: bool = False
+    matches_indian_pattern: bool = True
+    plate_crop_jpeg_base64: str | None = None
 
 
 class ManualAnprAnalyzeResponse(BaseModel):
@@ -42,7 +61,7 @@ class ManualAnprAnalyzeResponse(BaseModel):
     matches_indian_pattern: bool = False
     ocr_confident: bool = False
     processing_ms: int = 0
-    bbox: list[int] = Field(default_factory=list)
+    bbox: list[float] = Field(default_factory=list)
     plate_crop_jpeg_base64: str | None = None
     error: str | None = None
     event_created: bool = False
@@ -50,8 +69,17 @@ class ManualAnprAnalyzeResponse(BaseModel):
     plate_detector_used: str = "opencv"
     ai_detector_note: str | None = None
     plate_candidates: list[dict] = Field(default_factory=list)
-    selected_bbox: list[int] = Field(default_factory=list)
+    selected_bbox: list[float] = Field(default_factory=list)
+    detections: list[ManualAnprDetection] = Field(default_factory=list)
+    detection_count: int = 0
+    vehicle_results: list[dict[str, Any]] = Field(default_factory=list)
     anpr_debug: dict = Field(default_factory=dict)
+    anpr_roi_enabled: bool = False
+    anpr_roi: dict[str, Any] | None = None
+    roi_vehicles: int | None = None
+    ignored_outside_roi: int | None = None
+    total_yolo_vehicles: int | None = None
+    registry_match: dict[str, Any] | None = None
 
 
 class ManualAnprConfirmRequest(BaseModel):
@@ -109,8 +137,21 @@ async def analyze_manual_capture(
     auth_ms = (time.time() - t_auth) * 1000.0
     print(f"[ANPR TIME] API) Camera/auth lookup: {auth_ms:.2f} ms ({auth_ms / 1000.0:.4f} s)", flush=True)
 
+    anpr_roi = None
+    raw_roi = getattr(camera, "anpr_roi", None)
+    if raw_roi is not None:
+        if hasattr(raw_roi, "model_dump"):
+            anpr_roi = raw_roi.model_dump()
+        elif isinstance(raw_roi, dict):
+            anpr_roi = raw_roi
+
     t_anpr = time.time()
-    result = svc.run_anpr_on_bytes(data, suffix=suffix)
+    result = svc.run_anpr_on_bytes(
+        data,
+        suffix=suffix,
+        anpr_roi=anpr_roi,
+        camera_id=camera_id,
+    )
     anpr_ms = (time.time() - t_anpr) * 1000.0
     print(f"[ANPR TIME] API) run_anpr_on_bytes: {anpr_ms:.2f} ms ({anpr_ms / 1000.0:.4f} s)", flush=True)
     plate_crop = result.pop("_plate_crop_bytes", None)
@@ -145,6 +186,37 @@ async def analyze_manual_capture(
         result=result,
         plate_crop_bytes=plate_crop if isinstance(plate_crop, (bytes, bytearray)) else None,
     )
+    plate_for_lookup = (
+        analysis_meta.get("normalized_plate")
+        or payload.get("normalized_plate")
+        or payload.get("detected_plate")
+        or ""
+    )
+    if plate_for_lookup:
+        payload["registry_match"] = await reg_svc.lookup_plate(
+            db=db,
+            ctx=ctx,
+            user=ctx.user,
+            site_id=site_id,
+            plate=str(plate_for_lookup),
+            ocr_confidence=float(analysis_meta.get("ocr_confidence") or payload.get("ocr_confidence") or 0),
+            matches_pattern=bool(
+                analysis_meta.get("matches_indian_pattern")
+                or payload.get("matches_indian_pattern")
+            ),
+        )
+    else:
+        payload["registry_match"] = {
+            "known": False,
+            "status": "unknown",
+            "plate_normalized": "",
+            "person_name": None,
+            "flat_room_unit": None,
+            "mobile_number": None,
+            "registration_id": None,
+            "active": None,
+            "category": None,
+        }
     result.pop("_anpr_debug", None)
     resp_ms = (time.time() - t_resp) * 1000.0
     total_ms = (time.time() - api_t0) * 1000.0
@@ -242,7 +314,18 @@ async def confirm_manual_capture(
             )
             if event is None:
                 raise NotFoundError("Event was not created")
-            return EventOut.model_validate(fs.serialize_event_record(event, camera, site))
+            match = await reg_svc.lookup_plate(
+                db=db,
+                ctx=ctx,
+                user=ctx.user,
+                site_id=camera.site_id,
+                plate=event.plate_normalized,
+                ocr_confidence=float(event.ocr_confidence or 0),
+                matches_pattern=True,
+            )
+            return EventOut.model_validate(
+                fs.serialize_event_record(event, camera, site, registry_match=match)
+            )
 
         assert db is not None
         camera = await _load_camera_sql(db, pending.camera_id)
@@ -287,7 +370,16 @@ async def confirm_manual_capture(
         if event is None:
             raise NotFoundError("Event was not created")
         await db.refresh(event)
-        return EventOut.model_validate(serialize_event(event, camera, site))
+        match = await reg_svc.lookup_plate(
+            db=db,
+            ctx=ctx,
+            user=ctx.user,
+            site_id=camera.site_id,
+            plate=event.plate_normalized,
+            ocr_confidence=float(event.ocr_confidence or 0),
+            matches_pattern=True,
+        )
+        return EventOut.model_validate(serialize_event(event, camera, site, registry_match=match))
     finally:
         svc.delete_pending(body.capture_id)
 

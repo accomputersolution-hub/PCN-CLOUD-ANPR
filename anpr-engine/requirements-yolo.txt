@@ -1,0 +1,12 @@
+# Optional YOLO vehicle detector (AGPL-3.0 — Ultralytics)
+#
+# Install only if you accept AGPL-3.0 for Ultralytics:
+#   pip install -r requirements-yolo.txt
+#
+# Official nano weights (yolov8n.pt) are downloaded once from Ultralytics
+# GitHub release assets into ANPR_MODEL_DIR/vehicle/ — see models/README.md.
+#
+# Does NOT replace opencv-python-headless (already in requirements.txt).
+ultralytics>=8.3.0,<9
+# torch is pulled by ultralytics; prefer a CUDA build when a GPU is available:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124

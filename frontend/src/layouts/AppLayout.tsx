@@ -18,7 +18,7 @@ import { useRealtime } from "../shared/ws/RealtimeProvider";
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/events", label: "Events", icon: Radio },
-  { to: "/vehicles", label: "Search", icon: Search },
+  { to: "/vehicles", label: "Vehicles", icon: Search },
   { to: "/cameras", label: "Cameras", icon: Camera },
   { to: "/manual-anpr", label: "Manual ANPR", icon: ScanLine },
   { to: "/mock", label: "Mock ANPR", icon: Sparkles },
